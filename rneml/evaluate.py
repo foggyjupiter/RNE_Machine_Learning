@@ -32,6 +32,7 @@ the mean member variance plus the variance of the member means.
 from __future__ import annotations
 
 import json
+from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
@@ -39,6 +40,33 @@ import torch
 
 from rneml import data as D
 from rneml.model import CountNet
+
+
+@lru_cache(maxsize=4096)
+def clip_shake_frequency(path: str) -> float:
+    """Shaker speed of a recording, estimated from its sound [Hz]."""
+    from rneml.features import HOP, SR, frame_energy, mel_db, power_spectrogram, read_audio, shake_frequency
+    return shake_frequency(frame_energy(mel_db(power_spectrogram(read_audio(path)))), SR / HOP)
+
+
+def speed_diagnostic(f_est: np.ndarray, resid: np.ndarray, n_true: np.ndarray) -> dict:
+    """Does the count error follow the shaker speed? The first-study recordings drift
+    6.04-6.64 Hz (N = 95/100 at ≈ 6.5 Hz), and a model trained at one exact speed may read
+    a faster shaker as more particles. Within-N slope (residual and speed demeaned per true
+    N, so N itself cannot drive it) in counts per Hz, its correlation, and the speed range."""
+    rd, fd = [], []
+    for n in np.unique(n_true):
+        m = n_true == n
+        if m.sum() >= 3:
+            rd.append(resid[m] - resid[m].mean())
+            fd.append(f_est[m] - f_est[m].mean())
+    out = {"f_min": float(f_est.min()), "f_max": float(f_est.max()), "f_median": float(np.median(f_est))}
+    if rd:
+        rd, fd = np.concatenate(rd), np.concatenate(fd)
+        if fd.std() > 0 and rd.std() > 0:
+            out.update({"within_N_slope_per_hz": float((fd * rd).sum() / (fd * fd).sum()),
+                        "within_N_corr": float(np.corrcoef(fd, rd)[0, 1]), "n": int(len(rd))})
+    return out
 
 
 def load_model(run: str | Path, device="cpu"):
@@ -222,9 +250,12 @@ def evaluate_runs(runs: list[str | Path], cfg, out: str | Path, log=print) -> di
                     "unit": D.PROPERTIES[n][1], "pred_median": float(np.median(v)),
                     "pred_iqr": [float(np.percentile(v, 25)), float(np.percentile(v, 75))],
                     "true": (D.REAL_BB[n] * D.PROPERTIES[n][2]) if n in D.REAL_BB else None}
+        f_est = np.array([clip_shake_frequency(r["path"]) for r in real_test])
+        res["real_speed"] = speed_diagnostic(f_est, P["n"] - t, t)
         for k, r in enumerate(real_test):
             preds.append({"split": "real", "run_id": r["run_id"], "N": r["N"],
-                          "pred": float(P["n"][k]), "pred_std": float(P["n_std"][k])})
+                          "pred": float(P["n"][k]), "pred_std": float(P["n_std"][k]),
+                          "f_shake_est": float(f_est[k])})
     (out / "metrics.json").write_text(json.dumps(res, indent=1))
     with open(out / "predictions.jsonl", "w") as fh:
         for q in preds:

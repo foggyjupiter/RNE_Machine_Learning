@@ -188,7 +188,9 @@ def report(out_dir: str = "outputs") -> str:
     lines = ["# 실험 결과 요약", "",
              "MAE는 개수 오차(개). test = 학습과 같은 물성 분포의 새 실행, OOD = 학습에 없던 물성 영역, "
              "real = 1차 연구 실제 녹음(BB, 0~100개; 적응에 쓴 클립 제외). ±5 = 오차 5개 이내 비율. "
-             "R²는 물성 추정. corr(N,d) = N 오차와 지름 오차의 상관(음수면 '작은 입자 여러 개 vs 큰 입자 몇 개' 혼동).", ""]
+             "R²는 물성 추정. corr(N,d) = N 오차와 지름 오차의 상관(음수면 '작은 입자 여러 개 vs 큰 입자 몇 개' 혼동). "
+             "real 속도 기울기 = 같은 N 안에서 실측 가진 속도가 1 Hz 빠를 때 예측이 몇 개 늘어나는지 "
+             "(실측 속도는 6.04~6.64 Hz로 흔들림; 0에 가까울수록 속도에 휘둘리지 않음).", ""]
     for g in GROUP_TITLES:
         if g not in rows:
             continue
@@ -204,8 +206,8 @@ def report(out_dir: str = "outputs") -> str:
                              f"{_f(m.get('real', {}).get('mae'))} |")
         else:
             lines += ["| 실험 | 데이터 | 설정 | test MAE | test ±5 | OOD MAE | real MAE | real ±5 | "
-                      "R² 지름 | R² 밀도 | R² e_pw | corr(N,d) | 90% 구간 포함률 |",
-                      "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
+                      "R² 지름 | R² 밀도 | R² e_pw | corr(N,d) | 90% 구간 포함률 | real 속도 기울기 |",
+                      "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
             for name, data, over, m in rows[g]:
                 pr = m.get("properties_test", {})
                 dg = m.get("degeneracy_test", {}).get("corr_N_error_with", {})
@@ -217,7 +219,8 @@ def report(out_dir: str = "outputs") -> str:
                     _f(m.get("real", {}).get("within_5")),
                     _f(pr.get("diameter", {}).get("r2")), _f(pr.get("density", {}).get("r2")),
                     _f(pr.get("e_pw", {}).get("r2")), _f(dg.get("diameter")),
-                    _f(conf.get("coverage"))]) + " |")
+                    _f(conf.get("coverage")),
+                    _f(m.get("real_speed", {}).get("within_N_slope_per_hz"), "{:.0f}")]) + " |")
         lines.append("")
     text = "\n".join(lines)
     Path(out_dir, "REPORT.md").write_text(text)
