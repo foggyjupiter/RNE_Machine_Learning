@@ -52,15 +52,25 @@ AUX_NAMES = list(PROPERTIES)
 REAL_BB = {"diameter": 6e-3, "mass": 1.2e-4, "density": 1.2e-4 / (math.pi / 6 * 6e-3 ** 3)}
 
 
-def fetch(local_dir: str | Path, repo_id: str = REPO_ID, audio: bool = True) -> Path:
-    """Download (or update) the dataset; returns the local folder."""
+DATASETS = ("v1", "bb_fixed", "multi_rpm", "v1_r2")    # v1 = repo root
+
+
+def fetch(local_dir: str | Path, repo_id: str = REPO_ID, audio: bool = True,
+          sets: list[str] | None = None) -> Path:
+    """Download (or update) the dataset; returns the local folder (v1 at its root, the
+    others in sub-folders). ``sets``: only these of DATASETS (default all)."""
     from huggingface_hub import snapshot_download
 
-    pats = ["metadata.csv", "manifest.jsonl", "sweep_spec.yaml", "README.md"]
-    for sub in ("bb_fixed", "multi_rpm", "v1_r2"):
-        pats += [f"{sub}/metadata.csv", f"{sub}/manifest.jsonl", f"{sub}/sweep_spec.yaml"]
-    if audio:
-        pats += ["audio/**", "bb_fixed/audio/**", "multi_rpm/audio/**", "v1_r2/audio/**"]
+    sets = list(sets or DATASETS)
+    bad = [s for s in sets if s not in DATASETS]
+    if bad:
+        raise ValueError(f"unknown data sets {bad}; choose from {DATASETS}")
+    pats = ["README.md"]
+    for sub in sets:
+        pre = "" if sub == "v1" else f"{sub}/"
+        pats += [f"{pre}metadata.csv", f"{pre}manifest.jsonl", f"{pre}sweep_spec.yaml"]
+        if audio:
+            pats.append(f"{pre}audio/**")
     return Path(snapshot_download(repo_id, repo_type="dataset", local_dir=str(local_dir),
                                   allow_patterns=pats))
 

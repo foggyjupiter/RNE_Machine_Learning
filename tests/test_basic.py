@@ -390,3 +390,13 @@ def test_full_size_models_and_suite_configs():
         for _, name, _, _, base, over in EXPERIMENTS:
             over = {k: v for k, v in over.items() if k != "baseline"}
             load_config(base, name=name, **{**size, **over})
+
+
+def test_suite_parts_cover_every_experiment_once():
+    from rneml.suite import EXPERIMENTS, PART_DATA, PARTS
+    names = [n for part in PARTS.values() for n in part]
+    assert len(names) == len(set(names))
+    assert set(names) == {e[1] for e in EXPERIMENTS if e[0] <= 5}
+    data_of = {e[1]: e[3] for e in EXPERIMENTS}
+    for part, exps in PARTS.items():
+        assert {data_of[n] for n in exps} <= set(PART_DATA[part])

@@ -126,6 +126,27 @@ EXPERIMENTS = [
        {"seed": s, "material_input": ["diameter", "density", "mass"], "prop_weight": 0.0}) for s in (1, 2)],
 ]
 
+# Shares of the suite (priority ≤ 5) for parallel machines. M0 needs v1, v1_r2 and
+# bb_fixed and runs the component analysis its experiments depend on; M1 and M2 need v1
+# only; M3 needs multi_rpm only.
+PARTS = {
+    "M0": ["B9_selected_components", "B11_transfer_safe", "B12_transfer_safe_dann", "B10_all_components",
+           "R1_r2_blind", "R2_r2_known_size_weight", "R3_r2_transfer_safe", "R4_r2_hpss_denoise_dann",
+           "A4_first_study_repro", "A5_bb_trained"],
+    "M1": ["A1_blind", "A2_known_size_weight", "A3_known_all", "C1_dann", "C2_no_property_heads",
+           "C3_no_pair_losses", "C4_level_free", "C5_no_gain_augmentation",
+           "G_real_labeled_1", "G_real_labeled_2", "G_real_labeled_5",
+           "S_A1_blind_s1", "S_A1_blind_s2", "S_A2_known_size_weight_s1", "S_A2_known_size_weight_s2"],
+    "M2": ["F_rms", "F_onset", "F_order_params", "F_ridge_all", "F_gbm_physics", "F_gbm_all",
+           "B1_hpss_channels", "B2_denoise", "B3_mel22k", "B4_scalogram", "B5_band_6k_24k",
+           "B6_basic_scalars", "B7_no_scalars", "B8_hpss_denoise_dann",
+           "E1_extrap_restitution", "E2_hole_diameter", "E3_extrap_count",
+           "D_regression", "D_classification", "D_soft_label", "D_coral"],
+    "M3": ["H1_set_per_set", "H2_set_absolute", "H3_set_per_clip", "H4_set_diff_only", "H5_set_no_diff",
+           "H6_set_ordered", "H7_set_no_condition_value", "H8_set_known_size_weight"],
+}
+PART_DATA = {"M0": ["v1", "v1_r2", "bb_fixed"], "M1": ["v1"], "M2": ["v1"], "M3": ["multi_rpm"]}
+
 GROUP_TITLES = {
     "A": "A. 물질을 알려 주면 얼마나 좋아지나 (블라인드 vs 크기·무게 앎 vs 전부 앎 vs 물질 고정 학습)",
     "F": "F. 딥러닝 없는 기준선 (같은 분할·같은 지표)",

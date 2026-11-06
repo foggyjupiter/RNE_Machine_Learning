@@ -157,3 +157,13 @@ GPU가 없으면 `--width 16 --time-pool 2`를 붙이세요. 너비를 절반으
 - 같은 동역학 실행에서 나온 클립 4개는 독립이 아닙니다. 데이터셋의 `split` 열은 실행 단위로 나뉘어 있으니 그대로 쓰세요.
 - 시뮬레이션과 실측 사이에는 알려진 차이가 있습니다 (개별 충돌이 더 많이 들림, N = 100 주기성 등). 자세한 내용은 시뮬레이터 레포의 `results/sim2real/`에 있습니다.
 - 지름을 모르면 "작은 입자 여러 개"와 "큰 입자 몇 개"가 섞이는 영역이 생길 수 있습니다. `test_by_material`과 물성 R²로 확인하세요.
+
+## 여러 머신에 나눠 실행 (클라우드 세션 병렬)
+
+실험 묶음(우선순위 5 이하)은 `rneml/suite.py`의 `PARTS`로 네 몫으로 나뉩니다 (M0: 성분 분석 + B9~B12 + R + A4/A5, M1·M2: v1 실험, M3: 다중 rpm H). 각 머신에서:
+
+```bash
+REAL_DIR=<1차 연구 data-all 폴더> scripts/run_part.sh M1
+```
+
+필요한 데이터만 Hugging Face에서 받고(`rneml fetch --sets ...`), 실행하고, 30분마다와 끝에 결과를 돌려보냅니다 (`scripts/push_results.py`: 작은 결과 파일은 이 브랜치로 푸시, 모델은 데이터셋 저장소 `experiments/`로). 모두 모이면 `rneml suite-report`로 `outputs/REPORT.md`를 만듭니다. 실측 평가는 모든 실험이 개수별 6~15번 클립(210개)으로 같습니다.

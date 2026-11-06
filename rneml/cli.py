@@ -32,6 +32,7 @@ def main(argv=None):
     p.add_argument("--dir", default="data/v1")
     p.add_argument("--repo", default=None)
     p.add_argument("--no-audio", action="store_true")
+    p.add_argument("--sets", nargs="*", help="only these: v1 bb_fixed multi_rpm v1_r2 (default all)")
 
     p = sub.add_parser("train", help="train and evaluate")
     p.add_argument("--config", default="configs/blind.yaml")
@@ -106,6 +107,7 @@ def main(argv=None):
     p.add_argument("--real-dir")
     p.add_argument("--max-priority", type=int, default=5)
     p.add_argument("--only", nargs="*")
+    p.add_argument("--part", help="one share of the suite for parallel machines (rneml.suite.PARTS)")
     p.add_argument("--budget-hours", type=float)
     p.add_argument("--size", choices=["cpu", "default", "full"], default="default",
                    help="cpu: light CNN width 16, 20 ms frames, 30 epochs; full: ResNet + transformer, 80 epochs")
@@ -129,7 +131,7 @@ def main(argv=None):
     a = ap.parse_args(argv)
     if a.cmd == "fetch":
         from rneml.data import REPO_ID, fetch
-        print(fetch(a.dir, a.repo or REPO_ID, audio=not a.no_audio))
+        print(fetch(a.dir, a.repo or REPO_ID, audio=not a.no_audio, sets=a.sets))
     elif a.cmd == "train":
         from rneml.train import load_config, train
         cfg = load_config(a.config, data_dir=a.data_dir, real_dir=a.real_dir, epochs=a.epochs,
@@ -201,9 +203,13 @@ def main(argv=None):
         common = dict(SIZES["cpu" if a.cpu else a.size])
         if a.threads:
             common["threads"] = a.threads
+        from rneml.suite import PARTS
+        only = a.only
+        if a.part:
+            only = list(PARTS[a.part]) + list(a.only or [])
         run_suite({"v1": a.v1, "v1_r2": a.v1_r2, "bb_fixed": a.bb_fixed, "multi_rpm": a.multi_rpm},
                   a.real_dir,
-                  max_priority=a.max_priority, only=a.only, common=common, budget_hours=a.budget_hours)
+                  max_priority=a.max_priority, only=only, common=common, budget_hours=a.budget_hours)
         print(report())
     elif a.cmd == "suite-report":
         from rneml.suite import report
