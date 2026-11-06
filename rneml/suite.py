@@ -142,10 +142,11 @@ PARTS = {
            "R0_v1old_blind", "R0_v1old_known_size_weight",
            "R1_r2_blind", "R2_r2_known_size_weight", "R3_r2_transfer_safe", "R4_r2_hpss_denoise_dann",
            "A4_first_study_repro", "A5_bb_trained"],
-    "M1": ["A1_blind", "A2_known_size_weight", "A3_known_all", "C1_dann", "C2_no_property_heads",
-           "C3_no_pair_losses", "C4_level_free", "C5_no_gain_augmentation",
-           "G_real_labeled_1", "G_real_labeled_2", "G_real_labeled_5",
-           "S_A1_blind_s1", "S_A1_blind_s2", "S_A2_known_size_weight_s1", "S_A2_known_size_weight_s2"],
+    # M1 (15 v1-data experiments) is split in two so two machines can share it
+    "M1a": ["A1_blind", "A2_known_size_weight", "A3_known_all", "C1_dann",
+            "G_real_labeled_1", "G_real_labeled_2", "G_real_labeled_5", "S_A1_blind_s1"],
+    "M1b": ["C2_no_property_heads", "C3_no_pair_losses", "C4_level_free", "C5_no_gain_augmentation",
+            "S_A1_blind_s2", "S_A2_known_size_weight_s1", "S_A2_known_size_weight_s2"],
     "M2": ["F_rms", "F_onset", "F_order_params", "F_ridge_all", "F_gbm_physics", "F_gbm_all",
            "B1_hpss_channels", "B2_denoise", "B3_mel22k", "B4_scalogram", "B5_band_6k_24k",
            "B6_basic_scalars", "B7_no_scalars", "B8_hpss_denoise_dann",
@@ -154,7 +155,8 @@ PARTS = {
     "M3": ["H1_set_per_set", "H2_set_absolute", "H3_set_per_clip", "H4_set_diff_only", "H5_set_no_diff",
            "H6_set_ordered", "H7_set_no_condition_value", "H8_set_known_size_weight"],
 }
-PART_DATA = {"M0": ["v1", "v1_old", "v1_r2", "bb_fixed"], "M1": ["v1"], "M2": ["v1"], "M3": ["multi_rpm"]}
+PART_DATA = {"M0": ["v1", "v1_old", "v1_r2", "bb_fixed"], "M1a": ["v1"], "M1b": ["v1"], "M2": ["v1"],
+             "M3": ["multi_rpm"]}
 # suite data key → data set name on Hugging Face (rneml fetch --sets): the main data "v1" of
 # the suite is dataset v3 (calibrated); the old v1 is the repository root
 SUITE_TO_HF = {"v1": "v3", "v1_old": "v1", "v1_r2": "v1_r2", "bb_fixed": "bb_fixed", "multi_rpm": "multi_rpm"}
