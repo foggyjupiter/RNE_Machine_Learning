@@ -306,13 +306,22 @@ def plot(res: dict, out: Path) -> None:
 
 
 def run(data_dir: str, real_dir: str, out_dir: str = "outputs/components", cache_dir: str = "cache",
-        workers: int = 1, log=print) -> dict:
+        workers: int = 1, real_dev_per_N: int = 5, log=print) -> dict:
+    """Selection uses only the real 'development' clips (number ≤ real_dev_per_N per N);
+    verification on real clips uses only the others — no selection bias. Experiments
+    that use the selection must keep the development clips out of their real test set
+    (``real_exclude_per_N``)."""
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     sim_rows = [r for r in D.read_metadata(data_dir) if r["N"] > 0]
-    real_rows = [r for r in D.real_recordings(real_dir) if r["N"] > 0]
+    real_all = [r for r in D.real_recordings(real_dir) if r["N"] > 0]
+    k_of = lambda r: int(r["run_id"].split("-")[1])
+    real_rows = [r for r in real_all if k_of(r) <= real_dev_per_N]        # selection only
+    real_eval = [r for r in real_all if k_of(r) > real_dev_per_N]         # verification only
     Xs = compute([r["path"] for r in sim_rows], Path(cache_dir) / "components.npz", workers, log)
     Xr = compute([r["path"] for r in real_rows], Path(cache_dir) / "components.npz", workers, log)
+    Xe = compute([r["path"] for r in real_eval], Path(cache_dir) / "components.npz", workers, log)
+    log(f"real clips: {len(real_rows)} for selection (≤ {real_dev_per_N} per N), {len(real_eval)} for verification")
     res = analyse(sim_rows, Xs, real_rows, Xr, log)
     ps = pair_specificity(sim_rows, Xs)
     if ps:
@@ -325,8 +334,10 @@ def run(data_dir: str, real_dir: str, out_dir: str = "outputs/components", cache
     chosen = select(res)
     log(f"selected {len(chosen)} components: {chosen[:12]} …")
     res["selected"] = chosen
-    res["verification"] = verify(sim_rows, Xs, real_rows, Xr, chosen, log)
-    res["n_sim_clips"], res["n_real_clips"] = len(sim_rows), len(real_rows)
+    res["verification"] = verify(sim_rows, Xs, real_eval, Xe, chosen, log)
+    res["n_sim_clips"], res["n_real_selection"], res["n_real_verification"] = (
+        len(sim_rows), len(real_rows), len(real_eval))
+    res["real_dev_per_N"] = real_dev_per_N
     (out / "components.json").write_text(json.dumps(res, indent=1))
     plot(res, out)
     return res

@@ -58,6 +58,7 @@ class TrainConfig:
     real_train_per_N: int = 0            # labeled real clips per N used for training
     real_repeat: int = 10                # oversampling of the labeled real clips
     real_unlabeled_per_N: int = 0        # unlabeled real clips per N for domain adaptation
+    real_exclude_per_N: int = 0          # real clips per N used elsewhere (e.g. component selection): never scored
     dann_weight: float = 0.3             # max weight of the domain-adversarial loss
     real_unlabeled_per_batch: int = 8
     train_subset: str = "all"            # "all" (blind) or "bb_like" (known-material baseline)
@@ -80,7 +81,7 @@ class TrainConfig:
     noise_ref: str | None = None         # folder with empty-box clips 0-*.wav (default: real_dir)
     band_hz: list | None = None          # keep mel bands within [lo, hi] Hz
     use_modulation: bool = True          # modulation-spectrum features in the scalar branch
-    scalar_set: str = "all"              # all | basic (12 physics) | first_study (5: dB mean/std/max, flux, active)
+    scalar_set: str = "all"              # all | basic (12 physics) | first_study (5: dB mean/std/max, flux, active) | none
     material_input: list = field(default_factory=list)  # properties GIVEN to the model (e.g. [diameter, density, mass]); [] = blind
     component_scalars: str | None = None  # append component features: path of components.json (selected) or 'all'
     count_head: str = "regression"       # regression | classification | soft_label | coral
@@ -231,6 +232,8 @@ def prepare(img: np.ndarray, sc: np.ndarray, cfg: TrainConfig | dict, rows: list
 def scalar_columns(cfg: TrainConfig | dict, n_total: int) -> np.ndarray:
     get = (lambda k, d=None: cfg.get(k, d)) if isinstance(cfg, dict) else (lambda k, d=None: getattr(cfg, k, d))
     sset = get("scalar_set", "all")
+    if sset == "none":                               # only component / material scalars
+        return np.arange(0)
     if sset == "first_study":
         return np.arange(5)                          # db_mean, db_std, db_max, flux, active_ratio
     if sset == "basic" or not get("use_modulation", True):
@@ -380,6 +383,7 @@ def real_split(cfg: TrainConfig | dict) -> tuple[list[dict], list[dict], list[di
         return [], [], []
     rr = D.real_recordings(g("real_dir"))
     nl, nu = g("real_train_per_N"), g("real_unlabeled_per_N")
+    nx = (cfg.get("real_exclude_per_N", 0) if isinstance(cfg, dict) else getattr(cfg, "real_exclude_per_N", 0))
     lab, unl, test = [], [], []
     for r in rr:
         k = int(r["run_id"].split("-")[1])
@@ -387,7 +391,7 @@ def real_split(cfg: TrainConfig | dict) -> tuple[list[dict], list[dict], list[di
             lab.append(r)
         elif k <= nl + nu:
             unl.append(r)
-        else:
+        elif k > nx:
             test.append(r)
     return lab, unl, test
 

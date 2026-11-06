@@ -53,9 +53,19 @@ EXPERIMENTS = [
     (4, "B5_band_6k_24k", "B", "v1", "configs/blind.yaml", {"band_hz": [6000, 24000]}),
     (4, "B6_basic_scalars", "B", "v1", "configs/blind.yaml", {"scalar_set": "basic"}),
     (4, "B7_no_scalars", "B", "v1", "configs/blind.yaml", {"use_scalars": False}),
+    # selection used real clips 1-5 per N → those are never scored (real_exclude_per_N)
     (2, "B9_selected_components", "B", "v1", "configs/blind.yaml",
-     {"component_scalars": "outputs/components/components.json"}),
-    (3, "B10_all_components", "B", "v1", "configs/blind.yaml", {"component_scalars": "all"}),
+     {"component_scalars": "outputs/components/components.json", "real_exclude_per_N": 5}),
+    # transfer-safe input: only the >8 kHz image and the selected components (no shaker-locked
+    # modulation, period folding or onset counts — simulation-only cues in the analysis)
+    (2, "B11_transfer_safe", "B", "v1", "configs/blind.yaml",
+     {"band_hz": [8000, 24000], "scalar_set": "none",
+      "component_scalars": "outputs/components/components.json", "real_exclude_per_N": 5}),
+    (3, "B12_transfer_safe_dann", "B", "v1", "configs/blind.yaml",
+     {"band_hz": [8000, 24000], "scalar_set": "none", "real_unlabeled_per_N": 5,
+      "component_scalars": "outputs/components/components.json", "real_exclude_per_N": 5}),
+    (3, "B10_all_components", "B", "v1", "configs/blind.yaml",
+     {"component_scalars": "all", "real_exclude_per_N": 5}),
     (3, "B8_hpss_denoise_dann", "B", "v1", "configs/blind.yaml",
      {"feature": "mel+perc+harm", "denoise": True, "real_unlabeled_per_N": 5}),
     # E. generalisation splits
