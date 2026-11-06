@@ -67,9 +67,10 @@ def block(cin: int, cout: int, pool: tuple[int, int]) -> nn.Sequential:
 
 class CountNet(nn.Module):
     def __init__(self, n_scalars: int, n_props: int, width: int = 32, dropout: float = 0.3,
-                 use_scalars: bool = True):
+                 use_scalars: bool = True, time_pool: int = 1):
         super().__init__()
         w = width
+        self.time_pool = time_pool   # average-pool input frames (2 → 20 ms frames, ~3× faster)
         self.conv = nn.Sequential(block(1, w, (2, 2)), block(w, 2 * w, (2, 2)),
                                   block(2 * w, 4 * w, (2, 2)), block(4 * w, 4 * w, (2, 1)))
         self.use_scalars = use_scalars
@@ -84,7 +85,10 @@ class CountNet(nn.Module):
         self.domain = nn.Sequential(nn.Linear(128, 64), nn.ReLU(inplace=True), nn.Linear(64, 1))
 
     def embed(self, image: torch.Tensor, scalars: torch.Tensor) -> torch.Tensor:
-        h = self.conv(image.unsqueeze(1))         # [B, C, F', T']
+        x = image.unsqueeze(1)
+        if self.time_pool > 1:
+            x = nn.functional.avg_pool2d(x, (1, self.time_pool))
+        h = self.conv(x)                           # [B, C, F', T']
         h = h.mean(dim=2)                          # over frequency
         z = torch.cat([h.mean(-1), h.std(-1), h.amax(-1)], dim=1)
         if self.use_scalars:

@@ -36,6 +36,8 @@ rneml predict 새녹음.wav --run outputs/blind_mel [--run outputs/blind_scalogr
 ```
 새 녹음은 학습 데이터와 같은 조건이어야 합니다: 5×5×7 cm 상자, 372 rpm, 휴대폰 마이크 약 2.7 m.
 
+GPU가 없으면 `--width 16 --time-pool 2`를 붙이세요. 너비를 절반으로 줄이고 프레임을 20 ms로 묶어 약 9배 빨라집니다 (CPU 1스레드 기준 샘플당 0.31초 → 0.035초).
+
 `--real-dir`에는 1차 연구의 5초 클립 폴더(`{개수}-{번호}.wav`)를 줍니다. 비공개 저장소라면 `huggingface-cli login`을 먼저 하세요.
 특징은 처음 한 번 계산해 `cache/`에 저장합니다.
 

@@ -68,6 +68,7 @@ class TrainConfig:
     lr: float = 1e-3
     weight_decay: float = 1e-4
     width: int = 32
+    time_pool: int = 1                   # 2 = 20 ms frames (CPU-friendly, ~3× faster)
     dropout: float = 0.3
     use_scalars: bool = True
     prop_weight: float = 0.5
@@ -370,7 +371,8 @@ def train(cfg: TrainConfig, log=print) -> dict:
     pool = [(a, b, 0) for a, b in same_n] + [(a, b, 1) for a, b in same_m]
     log(f"contrast pairs: same_N {len(same_n)}, same_material {len(same_m)}")
 
-    model = CountNet(sc.shape[1], props.shape[1], cfg.width, cfg.dropout, cfg.use_scalars).to(dev)
+    model = CountNet(sc.shape[1], props.shape[1], cfg.width, cfg.dropout, cfg.use_scalars,
+                     cfg.time_pool).to(dev)
     opt = torch.optim.AdamW(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
     nb = math.ceil(len(train_idx) / cfg.batch)
     total = max(cfg.epochs * nb, 1)
