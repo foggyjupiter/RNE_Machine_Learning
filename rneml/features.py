@@ -34,7 +34,8 @@ Details of the mel image: Most impact
   the model may rely on it.
 * Scalar physics features (first-study fusion idea, extended): level statistics,
   spectral flux, active-frame ratio, waveform kurtosis (order parameter ψ3),
-  spectral entropy (ψ2), period-folded energy peakiness at the shaking frequency,
+  spectral entropy (ψ2), period-folded energy peakiness at the clip's own (estimated)
+  shaking frequency,
   spectral centroid, high-band onset rate.
 """
 
@@ -59,19 +60,26 @@ F_SHAKE = 6.2        # first-study working speed (372 rpm)
 BASIC_SCALARS = ["db_mean", "db_std", "db_max", "flux", "active_ratio", "kurtosis",
                  "entropy", "fold_peak", "centroid_khz", "onset_rate", "rms_db", "clip_frac"]
 
-# Modulation spectrum: how the energy of each band fluctuates in time. The shaking
-# frequency (6.2 Hz) and its harmonics, and the texture of collision rates, show up as
-# modulation peaks. Relative (level-free) and shift-invariant, so it needs no phase
-# reference and is unaffected by microphone gain or particle mass scaling the level.
+# The shaker's speed is estimated from each clip (not assumed): the first-study recordings
+# drift between 6.04 and 6.64 Hz at a nominal 6.2 Hz (N = 95/100 were recorded at ≈ 6.5 Hz),
+# and folding or binning at a fixed 6.2 Hz smears exactly those clips. Search range covers
+# the first study and the multi-rpm dataset (300-650 rpm).
+SHAKE_RANGE_HZ = (4.5, 11.5)
+# Modulation spectrum: how the energy of each band fluctuates in time, in bins placed
+# relative to the clip's own shaking frequency f0 (so speed drift does not move energy
+# between bins): peaks at the harmonics k·f0 (collective motion locked to the shaker),
+# at f0/2 (period doubling), the floor between harmonics (unlocked collisions), and the
+# absolute slow / texture bands. Relative (level-free) and shift-invariant, so it needs no
+# phase reference and is unaffected by microphone gain or particle mass scaling the level.
 MOD_GROUPS = 16                                  # mel bands grouped 8 by 8
-MOD_EDGES = np.geomspace(0.8, 50.0, 13)          # 12 modulation bins [Hz] (frame rate 100 Hz)
-MOD_NAMES = [f"mod_g{g:02d}_b{b:02d}" for g in range(MOD_GROUPS) for b in range(len(MOD_EDGES) - 1)]
+MOD_BINS = ["h1", "h2", "h3", "h4", "sub", "ih1", "ih2", "ih3", "below", "texture", "slow", "broad"]
+MOD_NAMES = [f"mod_g{g:02d}_{b}" for g in range(MOD_GROUPS) for b in MOD_BINS]
 # Spectral kurtosis per band group: the first study's waveform kurtosis ψ3 resolved in
 # frequency (which bands are impulsive), from the band power envelopes.
 SK_GROUPS = 16
 SK_NAMES = [f"sk_g{g:02d}" for g in range(SK_GROUPS)]
 SCALAR_NAMES = BASIC_SCALARS + MOD_NAMES + SK_NAMES
-FEATURE_VERSION = 3                              # bump when the cached features change
+FEATURE_VERSION = 4                              # bump when the cached features change
 MULTI_CHANNELS = ("mel", "perc", "harm")
 HPSS_KERNEL = 17                                 # 170 ms along time / ≈ 400 Hz along frequency
 
@@ -217,8 +225,39 @@ def scalogram(x: np.ndarray, sr: int = SR) -> np.ndarray:
     return np.maximum(10 * np.log10(out + 1e-12), DB_FLOOR).astype(np.float32)
 
 
+def shake_frequency(env: np.ndarray, rate: float, lo: float = SHAKE_RANGE_HZ[0],
+                    hi: float = SHAKE_RANGE_HZ[1], n_harm: int = 3) -> float:
+    """Shaking frequency [Hz] from the periodicity of an energy envelope sampled at ``rate``.
+
+    Harmonic sum of the zero-padded envelope spectrum over [lo, hi]; if the winner's half
+    also carries a clear peak (a harmonic picked as fundamental, or period doubling), the
+    half is returned.
+    """
+    e = np.asarray(env, np.float64)
+    if e.size < 8 or not np.isfinite(e).all() or e.std() == 0:
+        return float(F_SHAKE)
+    e = (e - e.mean()) * np.hanning(e.size)
+    n = 1 << int(np.ceil(np.log2(e.size * 32)))
+    S = np.abs(np.fft.rfft(e, n))
+    f = np.fft.rfftfreq(n, 1 / rate)
+    cand = f[(f >= lo) & (f <= hi)]
+    score = sum(np.interp(h * cand, f, S, right=0.0) for h in range(1, n_harm + 1))
+    f0 = float(cand[int(np.argmax(score))])
+    m = (f > 0.485 * f0) & (f < 0.515 * f0) & (f >= lo)
+    if m.any() and S[m].max() > 0.5 * np.interp(f0, f, S):
+        f0 = float(f[m][int(np.argmax(S[m]))])
+    return f0
+
+
+def frame_energy(S_db: np.ndarray) -> np.ndarray:
+    return (10 ** (S_db.astype(np.float64) / 10)).sum(0)
+
+
 def scalar_features(x: np.ndarray, S_db: np.ndarray, sr: int = SR,
-                    f_shake: float = F_SHAKE) -> np.ndarray:
+                    f_shake: float | None = None) -> np.ndarray:
+    """BASIC_SCALARS. f_shake None → the clip's own shaking frequency (estimated)."""
+    if f_shake is None:
+        f_shake = shake_frequency(frame_energy(S_db), sr / HOP)
     frame_db = S_db.mean(axis=0)
     flux = np.mean(np.abs(np.diff(S_db, axis=1)))
     active = np.mean(frame_db > frame_db.mean())
@@ -255,18 +294,35 @@ def scalar_features(x: np.ndarray, S_db: np.ndarray, sr: int = SR,
                      20 * np.log10(rms + 1e-9), np.mean(np.abs(x) >= 0.99)], np.float32)
 
 
-def modulation_features(S_db: np.ndarray, frame_rate: float = SR / HOP) -> np.ndarray:
-    """[MOD_GROUPS × 12] log modulation-spectrum magnitudes of the band envelopes."""
-    P = 10 ** (S_db / 10)
+def modulation_features(S_db: np.ndarray, frame_rate: float = SR / HOP,
+                        f_shake: float | None = None) -> np.ndarray:
+    """[MOD_GROUPS × len(MOD_BINS)] log modulation-spectrum magnitudes of the band
+    envelopes, binned relative to the shaking frequency (estimated if None)."""
+    P = 10 ** (S_db.astype(np.float64) / 10)
+    if f_shake is None:
+        f_shake = shake_frequency(P.sum(0), frame_rate)
+    f0 = float(f_shake)
     g = P[: (P.shape[0] // MOD_GROUPS) * MOD_GROUPS].reshape(MOD_GROUPS, -1, P.shape[1]).sum(1)
     g = g / (g.mean(1, keepdims=True) + 1e-20) - 1.0          # relative fluctuation
     w = np.hanning(g.shape[1])
-    M = np.abs(np.fft.rfft(g * w, axis=1)) / w.sum()
-    f = np.fft.rfftfreq(g.shape[1], 1 / frame_rate)
-    out = np.empty((MOD_GROUPS, len(MOD_EDGES) - 1), np.float32)
-    for b in range(len(MOD_EDGES) - 1):
-        m = (f >= MOD_EDGES[b]) & (f < MOD_EDGES[b + 1])
-        out[:, b] = M[:, m].max(1) if m.any() else 0.0   # peaks (shaking harmonics) kept
+    n = 1 << int(np.ceil(np.log2(g.shape[1] * 4)))            # 4× zero padding for the peaks
+    M = np.abs(np.fft.rfft(g * w, n, axis=1)) / w.sum()
+    f = np.fft.rfftfreq(n, 1 / frame_rate)
+    nyq = frame_rate / 2
+    half_w = max(0.4, 0.06 * f0)                              # ≥ Hann main-lobe half width (5 s)
+
+    def peak(fc):
+        m = (f >= fc - half_w) & (f <= fc + half_w)
+        return M[:, m].max(1) if (m.any() and fc + half_w < nyq) else np.zeros(MOD_GROUPS)
+
+    def floor(lo, hi):
+        m = (f >= lo) & (f < min(hi, nyq))
+        return np.median(M[:, m], 1) if m.sum() > 1 else np.zeros(MOD_GROUPS)
+
+    cols = [peak(k * f0) for k in (1, 2, 3, 4)] + [peak(0.5 * f0)]
+    cols += [floor((k + 0.25) * f0, (k + 0.75) * f0) for k in (1, 2, 3)]
+    cols += [floor(0.15 * f0, 0.4 * f0), floor(4.5 * f0, nyq), floor(0.3, 1.5), floor(1.0, nyq)]
+    out = np.stack(cols, 1).astype(np.float32)
     return np.log10(out + 1e-6).ravel()
 
 
@@ -302,7 +358,9 @@ def extract(path: str | Path, kind: str = "mel", gain: float = 1.0,
     if band is not None and kind not in ("scalogram", "mel22k"):
         rows = band_rows(*band)
         img = img[..., rows, :]
-    sc = np.concatenate([scalar_features(x, S), modulation_features(S), spectral_kurtosis(S)])
+    f0 = shake_frequency(frame_energy(S), SR / HOP)
+    sc = np.concatenate([scalar_features(x, S, f_shake=f0), modulation_features(S, f_shake=f0),
+                         spectral_kurtosis(S)])
     return img, sc.astype(np.float32)
 
 

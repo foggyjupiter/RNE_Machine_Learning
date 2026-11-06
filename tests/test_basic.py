@@ -4,7 +4,7 @@ import numpy as np
 import torch
 
 from rneml import data as D
-from rneml.features import (BASIC_SCALARS, HOP, MOD_EDGES, N_MELS, SCALAR_NAMES, SCALO_BANDS, SR,
+from rneml.features import (BASIC_SCALARS, HOP, MOD_BINS, N_MELS, SCALAR_NAMES, SCALO_BANDS, SR,
                             _morlet_bank, log_mel, modulation_features, scalar_features, scalogram)
 from rneml.model import CountNet
 
@@ -80,13 +80,25 @@ def test_modulation_features_see_shaking_period_and_ignore_level_and_shift():
     rnd = _clicks(np.sort(np.random.default_rng(1).uniform(0, 5, 31)))
     fp = modulation_features(log_mel(per)).reshape(16, -1)
     fr = modulation_features(log_mel(rnd)).reshape(16, -1)
-    centres = np.sqrt(MOD_EDGES[:-1] * MOD_EDGES[1:])
-    k = int(np.argmin(np.abs(centres - 6.2)))
-    assert fp[8, k] > fr[8, k] + 0.2                  # periodic clicks → peak near 6.2 Hz
+    k = MOD_BINS.index("h1")
+    assert fp[8, k] > fr[8, k] + 0.2                  # periodic clicks → peak at the shaking frequency
     assert np.allclose(modulation_features(log_mel(3 * per)), modulation_features(log_mel(per)),
                        atol=1e-3)                     # level-free
     shifted = np.roll(per, SR // 20)                  # phase-free
     assert np.abs(modulation_features(log_mel(shifted)) - modulation_features(log_mel(per))).mean() < 0.05
+
+
+def test_shake_frequency_is_estimated_per_clip():
+    """Real shaker speed drifts (6.0-6.7 Hz); features must follow it, not assume 6.2 Hz."""
+    from rneml.features import frame_energy, shake_frequency
+    for f_true in (5.0, 6.05, 6.5, 7.5, 10.8):
+        x = _clicks(np.arange(0.01, 5, 1 / f_true))
+        f_est = shake_frequency(frame_energy(log_mel(x)), SR / HOP)
+        assert abs(f_est - f_true) < 0.03 * f_true, (f_true, f_est)
+    a = modulation_features(log_mel(_clicks(np.arange(0.01, 5, 1 / 6.2)))).reshape(16, -1)
+    b = modulation_features(log_mel(_clicks(np.arange(0.01, 5, 1 / 6.5)))).reshape(16, -1)
+    k = MOD_BINS.index("h1")
+    assert abs(a[8, k] - b[8, k]) < 0.15              # 5 % speed drift stays in the same bin
 
 
 def test_gradient_reversal():

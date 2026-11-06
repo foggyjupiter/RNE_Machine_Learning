@@ -9,6 +9,7 @@ The sound is decomposed along two axes:
     impulsiveness  kurtosis of the band envelope   how spiky (ψ3 resolved in frequency)
     onset_rate     rises > 9 dB within 20 ms /s    distinct impacts heard in the band
     mod_shake      modulation at k·f_shake, k=1..4 collective motion locked to the shaker
+                   (f_shake estimated per clip)
     mod_texture    modulation 20-50 Hz             texture of the collision rate
     mod_slow       modulation 0.3-2 Hz             slow drifts
     fold_peak      max/mean of the period-folded   energy concentrated at one phase (ψ1,
@@ -65,8 +66,13 @@ def _group(M_lin: np.ndarray) -> np.ndarray:
     return M_lin.reshape(N_BANDS, -1, M_lin.shape[1]).sum(1)          # [16, T]
 
 
-def component_features(path: str, f_shake: float = F_SHAKE) -> np.ndarray:
-    """[N_BANDS, len(TYPES)] for one clip."""
+COMPONENTS_VERSION = 2   # 2: shaking frequency estimated per clip (was fixed 6.2 Hz)
+
+
+def component_features(path: str, f_shake: float | None = None) -> np.ndarray:
+    """[N_BANDS, len(TYPES)] for one clip. f_shake None → estimated from the clip (the real
+    shaker drifts 6.0-6.7 Hz; a fixed 6.2 Hz smears the folded profile and misses the
+    harmonics of exactly the clips that drifted)."""
     x = read_audio(path)
     P = power_spectrogram(x)
     from rneml.features import mel_filterbank
@@ -77,16 +83,21 @@ def component_features(path: str, f_shake: float = F_SHAKE) -> np.ndarray:
     dB = 10 * np.log10(E + 1e-12)
     out = np.zeros((N_BANDS, len(TYPES)), np.float32)
     T = E.shape[1]
+    if f_shake is None:
+        from rneml.features import shake_frequency
+        f_shake = shake_frequency(E.sum(0), FR)
     w = np.hanning(T)
-    f = np.fft.rfftfreq(T, 1 / FR)
+    nfft = 1 << int(np.ceil(np.log2(T * 4)))
+    f = np.fft.rfftfreq(nfft, 1 / FR)
+    hw = max(0.4, 0.06 * f_shake)
     ph = (f_shake * np.arange(T) / FR) % 1.0
     b = np.minimum((ph * 32).astype(int), 31)
     lag = int(0.02 * FR) or 1
     for g in range(N_BANDS):
         e = E[g]
         rel = e / (e.mean() + 1e-20) - 1
-        M = np.abs(np.fft.rfft(rel * w)) / w.sum()
-        shake = sum(M[np.argmin(np.abs(f - k * f_shake))] for k in range(1, 5))
+        M = np.abs(np.fft.rfft(rel * w, nfft)) / w.sum()
+        shake = sum(M[(f >= k * f_shake - hw) & (f <= k * f_shake + hw)].max() for k in range(1, 5))
         prof = np.bincount(b, weights=e, minlength=32) / np.maximum(np.bincount(b, minlength=32), 1)
         rise = dB[g, lag:] - dB[g, :-lag]
         on = np.flatnonzero((rise[1:] > 9) & (rise[:-1] <= 9))
@@ -106,7 +117,9 @@ def compute(paths: list[str], cache: Path, workers: int = 1, log=print) -> np.nd
     from concurrent.futures import ProcessPoolExecutor
     cache = Path(cache)
     have = {}
-    for c in [cache, *sorted(cache.parent.glob("components_*.npz"))]:
+    if f"_v{COMPONENTS_VERSION}" not in cache.stem:
+        cache = cache.with_name(f"{cache.stem}_v{COMPONENTS_VERSION}{cache.suffix}")
+    for c in [cache, *sorted(cache.parent.glob(f"components_*v{COMPONENTS_VERSION}.npz"))]:
         if c.exists():
             z = np.load(c, allow_pickle=False)
             have.update(zip(z["paths"].tolist(), z["X"]))
