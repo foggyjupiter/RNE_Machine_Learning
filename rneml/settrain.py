@@ -27,7 +27,7 @@ import yaml
 from rneml import data as D
 from rneml import splits as SP
 from rneml.model import grad_reverse
-from rneml.setmodel import (GAMMA_REF, SetCountNet, batch_arrays, build_sets, normalize_levels,
+from rneml.setmodel import (GAMMA_REF, SetCountNet, condition_gamma, batch_arrays, build_sets, normalize_levels,
                             predict_sets, set_forward)
 from rneml.train import (Norm, _device, _gnll, conformal_metrics,
                          metrics, real_split, scalar_columns)
@@ -66,7 +66,7 @@ def train_set(cfg, log=print) -> dict:
     SP.save(rows, cfg.split, cfg.split_seed, out / "split.json")
     keep = [r for r in rows if r["role"] in ("train", "val", "pairs")]
     img, sc = _features(cfg, keep, Path(cfg.data_dir).name, log)
-    gamma = np.array([float(r.get("gamma", REAL_GAMMA)) for r in keep], np.float32)
+    gamma = np.array([condition_gamma(r, REAL_GAMMA) for r in keep], np.float32)
     y = np.array([r["N"] for r in keep], np.float32) / 100.0
     props = np.stack([D.aux_targets(r) for r in keep])
     mask_p = np.ones_like(props)
@@ -242,7 +242,7 @@ def evaluate_set(run, cfg, log=print) -> dict:
         if not rs:
             continue
         img, sc = _features(cfg, rs, Path(eval_dir).name, log)
-        gamma = np.array([float(r.get("gamma", REAL_GAMMA)) for r in rs], np.float32)
+        gamma = np.array([condition_gamma(r, REAL_GAMMA) for r in rs], np.float32)
         subsets = dict(cfg.eval_condition_subsets or {"all": None})
         for name, conds in subsets.items():
             sets = build_sets(rs, conds)

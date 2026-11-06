@@ -139,6 +139,17 @@ class SetCountNet(nn.Module):
         return Output(n, n_lv, pm, plv, e, logits)
 
 
+def condition_gamma(row: dict, default: float) -> float:
+    """Γ the set model is told: the *nominal* one when the dataset has it (the speed the
+    experimenter set; the simulated clips carry a few per cent of speed jitter, like the
+    real shaker), else the simulated one, else ``default``."""
+    for k in ("gamma_nominal", "gamma"):
+        v = row.get(k)
+        if v not in (None, ""):
+            return float(v)
+    return float(default)
+
+
 def build_sets(rows: list[dict], conditions: list[int] | None = None) -> list[list[int]]:
     """Indices of rows grouped by (system_id, render), sorted by Γ. ``conditions``
     keeps only these condition indices (evaluation with fewer conditions)."""
@@ -150,7 +161,7 @@ def build_sets(rows: list[dict], conditions: list[int] | None = None) -> list[li
         groups.setdefault(key, []).append(i)
     out = []
     for key in sorted(groups):
-        out.append(sorted(groups[key], key=lambda i: float(rows[i].get("gamma", GAMMA_REF))))
+        out.append(sorted(groups[key], key=lambda i: condition_gamma(rows[i], GAMMA_REF)))
     return out
 
 
