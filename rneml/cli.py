@@ -8,6 +8,7 @@
     rneml compare outputs/a outputs/b                   # paired test on the same clips
     rneml baselines --real-dir PATH                     # RMS / onset / order params / ridge / GBM
     rneml report outputs/*                              # markdown comparison table
+    rneml interpret outputs/blind_mel                   # embedding map, probes, band masking
     rneml predict rec1.wav rec2.wav --run outputs/blind_mel [--run outputs/...]
 """
 
@@ -90,6 +91,10 @@ def main(argv=None):
     p.add_argument("--bb-like", action="store_true", help="compare with BB-like simulated material only")
     p.add_argument("--out", help="write the result as JSON")
 
+    p = sub.add_parser("interpret", help="embedding map, linear probes, band masking")
+    p.add_argument("run")
+    p.add_argument("--data-dir")
+
     p = sub.add_parser("predict", help="N and material of new recordings")
     p.add_argument("files", nargs="+", help="wav files")
     p.add_argument("--run", action="append", required=True,
@@ -162,6 +167,9 @@ def main(argv=None):
                   material=BB_LIKE if a.bb_like else None)
         if a.out:
             Path(a.out).write_text(json.dumps(res, indent=1))
+    elif a.cmd == "interpret":
+        from rneml.interpret import interpret
+        interpret(a.run, a.data_dir)
     elif a.cmd == "predict":
         from rneml.infer import format_result, predict_files
         res = predict_files(a.run, a.files)
