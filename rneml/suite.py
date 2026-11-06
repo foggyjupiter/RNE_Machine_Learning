@@ -5,8 +5,9 @@ Each experiment = a base config + overrides (+ the data it needs). Finished expe
 restarted at any time. ``report()`` collects every finished experiment into
 outputs/REPORT.md, grouped by the question it answers.
 
-Data sets: ``v1`` (single condition, material varied), ``bb_fixed`` (first-study BB
-only), ``multi_rpm`` (v2, each system at five shaker speeds).
+Data sets: ``v1`` (single condition, material varied), ``v1_r2`` (the same v1 dynamics
+re-rendered with a per-impact radiation spread), ``bb_fixed`` (first-study BB only),
+``multi_rpm`` (v2, each system at five shaker speeds).
 """
 
 from __future__ import annotations
@@ -105,6 +106,18 @@ EXPERIMENTS = [
         ("set_known_size_weight", "multi_rpm", "configs/set_multi_rpm.yaml",
          {"material_input": ["diameter", "density", "mass"], "prop_weight": 0.0}),
     ], start=1)],
+    # R. acoustic domain randomisation: the same v1 dynamics re-rendered (gransim rerender)
+    # with an impact-to-impact radiation spread σ ~ U(0, 1.5), level-neutral — the recorded
+    # high-band envelope distribution matches σ ≈ 1.2, the original v1 audio has σ = 0.
+    # Compare with A1 / A2 / B11 / B8 (same dynamics, same splits) on the real recordings.
+    (2, "R1_r2_blind", "R", "v1_r2", "configs/blind.yaml", {}),
+    (2, "R2_r2_known_size_weight", "R", "v1_r2", "configs/blind.yaml",
+     {"material_input": ["diameter", "density", "mass"], "prop_weight": 0.0}),
+    (3, "R3_r2_transfer_safe", "R", "v1_r2", "configs/blind.yaml",
+     {"band_hz": [8000, 24000], "scalar_set": "none",
+      "component_scalars": "outputs/components/components.json", "real_exclude_per_N": 5}),
+    (3, "R4_r2_hpss_denoise_dann", "R", "v1_r2", "configs/blind.yaml",
+     {"feature": "mel+perc+harm", "denoise": True, "real_unlabeled_per_N": 5}),
     # S. repeated seeds of the key comparisons
     *[(5, f"S_A1_blind_s{s}", "S", "v1", "configs/blind.yaml", {"seed": s}) for s in (1, 2)],
     *[(5, f"S_A2_known_size_weight_s{s}", "S", "v1", "configs/blind.yaml",
@@ -121,6 +134,7 @@ GROUP_TITLES = {
     "G": "G. 실측 녹음 몇 개에 정답을 붙이면",
     "H": "H. 다중 조건 (5개 rpm) 모델",
     "Z": "Z. 큰 모델 (ResNet + SE + 시간축 트랜스포머)",
+    "R": "R. 음향 도메인 무작위화 (같은 동역학, 충돌마다 방사 효율이 다른 소리로 다시 합성한 v1)",
     "S": "S. 시드 반복",
 }
 

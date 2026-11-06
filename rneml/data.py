@@ -57,10 +57,10 @@ def fetch(local_dir: str | Path, repo_id: str = REPO_ID, audio: bool = True) -> 
     from huggingface_hub import snapshot_download
 
     pats = ["metadata.csv", "manifest.jsonl", "sweep_spec.yaml", "README.md"]
-    for sub in ("bb_fixed", "multi_rpm"):
+    for sub in ("bb_fixed", "multi_rpm", "v1_r2"):
         pats += [f"{sub}/metadata.csv", f"{sub}/manifest.jsonl", f"{sub}/sweep_spec.yaml"]
     if audio:
-        pats += ["audio/**", "bb_fixed/audio/**", "multi_rpm/audio/**"]
+        pats += ["audio/**", "bb_fixed/audio/**", "multi_rpm/audio/**", "v1_r2/audio/**"]
     return Path(snapshot_download(repo_id, repo_type="dataset", local_dir=str(local_dir),
                                   allow_patterns=pats))
 

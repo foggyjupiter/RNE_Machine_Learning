@@ -100,6 +100,7 @@ def main(argv=None):
 
     p = sub.add_parser("suite", help="run the report experiment suite (resumable)")
     p.add_argument("--v1", required=True, help="main dataset folder (metadata.csv)")
+    p.add_argument("--v1-r2", help="v1 re-rendered with a per-impact radiation spread")
     p.add_argument("--bb-fixed", help="fixed-material companion set folder")
     p.add_argument("--multi-rpm", help="multi-condition dataset folder")
     p.add_argument("--real-dir")
@@ -200,7 +201,8 @@ def main(argv=None):
         common = dict(SIZES["cpu" if a.cpu else a.size])
         if a.threads:
             common["threads"] = a.threads
-        run_suite({"v1": a.v1, "bb_fixed": a.bb_fixed, "multi_rpm": a.multi_rpm}, a.real_dir,
+        run_suite({"v1": a.v1, "v1_r2": a.v1_r2, "bb_fixed": a.bb_fixed, "multi_rpm": a.multi_rpm},
+                  a.real_dir,
                   max_priority=a.max_priority, only=a.only, common=common, budget_hours=a.budget_hours)
         print(report())
     elif a.cmd == "suite-report":
