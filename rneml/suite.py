@@ -178,13 +178,17 @@ GROUP_TITLES = {
 
 def run_suite(paths: dict, real_dir: str | None, out_dir: str = "outputs", max_priority: int = 5,
               only: list[str] | None = None, common: dict | None = None,
-              budget_hours: float | None = None, log=print) -> None:
+              budget_hours: float | None = None, log=print, reverse: bool = False) -> None:
+    """Run the experiments (resumable). ``reverse``: last first — a helper machine taking
+    the tail of another machine's list meets it in the middle instead of repeating it."""
     from rneml.baselines import run_baseline
     from rneml.train import load_config, train
 
     t0 = time.time()
     todo = sorted((e for e in EXPERIMENTS if e[0] <= max_priority and (not only or e[1] in only)),
                   key=lambda e: e[0])
+    if reverse:
+        todo = todo[::-1]
     for prio, name, group, data, base, over in todo:
         if budget_hours and time.time() - t0 > budget_hours * 3600:
             log("time budget reached; run again to continue")

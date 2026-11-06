@@ -109,6 +109,7 @@ def main(argv=None):
     p.add_argument("--max-priority", type=int, default=5)
     p.add_argument("--only", nargs="*")
     p.add_argument("--part", help="one share of the suite for parallel machines (rneml.suite.PARTS)")
+    p.add_argument("--reverse", action="store_true", help="run the list last-first (helper machines)")
     p.add_argument("--budget-hours", type=float)
     p.add_argument("--size", choices=["cpu", "default", "full"], default="default",
                    help="cpu: light CNN width 16, 20 ms frames, 30 epochs; full: ResNet + transformer, 80 epochs")
@@ -211,7 +212,8 @@ def main(argv=None):
         run_suite({"v1": a.v1, "v1_old": a.v1_old, "v1_r2": a.v1_r2, "bb_fixed": a.bb_fixed,
                    "multi_rpm": a.multi_rpm},
                   a.real_dir,
-                  max_priority=a.max_priority, only=only, common=common, budget_hours=a.budget_hours)
+                  max_priority=a.max_priority, only=only, common=common, budget_hours=a.budget_hours,
+                  reverse=a.reverse)
         print(report())
     elif a.cmd == "suite-report":
         from rneml.suite import report
