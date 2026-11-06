@@ -156,7 +156,8 @@ def features_for(rows: list[dict], cache: Path, workers: int, log=print, kind: s
         have = {p: k for k, p in enumerate(ps.tolist())}
     z = np.load(cache)
     idx = np.array([have[p] for p in paths], dtype=np.int64)
-    return z["mel"][idx], z["scalars"][idx]
+    # features cached before the NaN guard (silent bands) are cleaned here as well
+    return z["mel"][idx], np.nan_to_num(z["scalars"][idx], nan=0.0, posinf=0.0, neginf=0.0)
 
 
 def cache_path(cfg: TrainConfig, what: str, gain: float = 1.0) -> Path:

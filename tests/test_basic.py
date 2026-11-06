@@ -403,3 +403,16 @@ def test_suite_parts_cover_every_experiment_once():
     data_of = {e[1]: e[3] for e in EXPERIMENTS}
     for part, exps in PARTS.items():
         assert {data_of[n] for n in exps} <= set(PART_DATA[part])
+
+
+def test_silent_band_gives_finite_features():
+    """A clip whose top band is completely silent (slowed-down motor noise) must not give
+    NaN features: one NaN scalar turns the whole training loss into NaN."""
+    from rneml.features import HOP, SR, log_mel, modulation_features, scalar_features, spectral_kurtosis
+    x = np.random.default_rng(0).standard_normal(SR * 5).astype(np.float32) * 0.05
+    X = np.fft.rfft(x)
+    X[np.fft.rfftfreq(len(x), 1 / SR) > 15000] = 0.0
+    x = np.fft.irfft(X, len(x)).astype(np.float32)              # exactly nothing above 15 kHz
+    S = log_mel(x)
+    assert np.isfinite(spectral_kurtosis(S)).all()
+    assert np.isfinite(scalar_features(x, S)).all() and np.isfinite(modulation_features(S)).all()

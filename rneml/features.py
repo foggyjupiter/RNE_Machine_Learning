@@ -172,7 +172,11 @@ def spectral_kurtosis(S_db: np.ndarray) -> np.ndarray:
     """Excess kurtosis over time of the band-group power envelopes [SK_GROUPS]."""
     P = 10 ** (S_db / 10)
     g = P[: (P.shape[0] // SK_GROUPS) * SK_GROUPS].reshape(SK_GROUPS, -1, P.shape[1]).sum(1)
-    k = stats.kurtosis(g, axis=1)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        k = stats.kurtosis(g, axis=1)
+    # a band with constant (e.g. zero) power has no kurtosis: the empty-box clips of the
+    # multi-rpm data at 300 rpm (motor noise slowed down 20 %) leave 22-24 kHz silent
+    k = np.nan_to_num(k, nan=0.0, posinf=0.0, neginf=0.0)
     return np.sign(k) * np.log1p(np.abs(k))          # compress heavy tails
 
 
