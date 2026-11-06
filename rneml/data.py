@@ -98,6 +98,22 @@ def real_property_targets(n: int) -> tuple[np.ndarray, np.ndarray]:
     return t, m
 
 
+def material_inputs(rows: list[dict], names: list[str]) -> np.ndarray:
+    """Normalised values of the given material properties, to be fed to the model as
+    inputs (the 'material known' experiments). Real recordings: only the first-study BB's
+    diameter, density and mass are known; other requested properties are set to the
+    training mean (0) — avoid requesting them when scoring real clips."""
+    out = np.zeros((len(rows), len(names)), np.float32)
+    for i, r in enumerate(rows):
+        for j, n in enumerate(names):
+            col = PROPERTIES[n][0]
+            if r.get(col) is not None:
+                out[i, j] = PROPERTIES[n][3](r[col])
+            elif r.get("split") == "real" and n in REAL_BB:
+                out[i, j] = PROPERTIES[n][3](REAL_BB[n])
+    return out
+
+
 def to_physical(name: str, z: np.ndarray) -> np.ndarray:
     """Normalised prediction → SI value (z clipped to ±10 so log-scaled ones cannot overflow)."""
     return np.vectorize(PROPERTIES[name][4])(np.clip(z, -10.0, 10.0))

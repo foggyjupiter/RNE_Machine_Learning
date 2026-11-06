@@ -350,3 +350,14 @@ def test_multichannel_model_and_set_model():
     a, _ = normalize_levels(img, np.zeros((1, 2, len(SCALAR_NAMES)), np.float32), np.ones((1, 2), bool), "per_set")
     b, _ = normalize_levels(img + 7, np.zeros((1, 2, len(SCALAR_NAMES)), np.float32), np.ones((1, 2), bool), "per_set")
     assert np.allclose(a, b, atol=1e-4)
+
+
+def test_material_inputs_known_and_real():
+    rows = [{"particle_diameter_m": 7e-3, "particle_density": 3000.0, "particle_mass_kg": 5e-4,
+             "restitution_pw": 0.6, "split": "test"},
+            {"N": 20, "split": "real", "run_id": "20-3", "path": "x"}]
+    m = D.material_inputs(rows, ["diameter", "density", "e_pw"])
+    assert m.shape == (2, 3)
+    assert abs(float(D.to_physical("diameter", m[0, 0])) - 7e-3) < 1e-9
+    assert abs(float(D.to_physical("diameter", m[1, 0])) - 6e-3) < 1e-9   # real BB
+    assert m[1, 2] == 0.0                                                 # unknown for real → mean

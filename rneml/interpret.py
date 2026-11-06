@@ -82,8 +82,7 @@ def interpret(run: str | Path, data_dir: str | None = None, split: str = "test",
         rs += SP.select_role(rows, "test_ood")
     rs = [r for r in rs if r["N"] > 0]
     img_raw, sc_raw = feats(cfg, rs, Path(ddir).name, log)
-    img, sc = prepare(img_raw, sc_raw, cfg)
-    sc = sc[:, :len(norm.s_mu)]
+    img, sc = prepare(img_raw, sc_raw, cfg, rs, len(norm.s_mu) - len(cfg.material_input))
     Z = _embed(model, img, sc, norm, dev)
     groups = np.array([str(r.get("system_id") or r["run_id"]) for r in rs])
     res: dict = {"n_clips": len(rs), "probe_r2": {}}

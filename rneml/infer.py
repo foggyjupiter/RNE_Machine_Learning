@@ -25,8 +25,9 @@ def predict_files(runs: list[str | Path], files: list[str], device: str = "cpu")
         feats = [extract(f, cfg.feature) for f in files]
         img = np.stack([a for a, _ in feats]).astype(np.float16)
         sc = np.stack([b for _, b in feats])
-        img, sc = prepare(img, sc, cfg)
-        sc = sc[:, :len(norm.s_mu)]
+        if cfg.material_input:
+            raise ValueError("a 'material known' model needs the material; use a blind model")
+        img, sc = prepare(img, sc, cfg, None, len(norm.s_mu))
         outs.append(predict(model, img, sc, norm, device, crop_frac=cfg.crop_frac,
                             tta_crops=cfg.tta_crops, sigma_scale=ss))
     n = np.mean([o["n"] for o in outs], 0)

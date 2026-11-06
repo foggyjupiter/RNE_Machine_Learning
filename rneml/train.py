@@ -81,6 +81,7 @@ class TrainConfig:
     band_hz: list | None = None          # keep mel bands within [lo, hi] Hz
     use_modulation: bool = True          # modulation-spectrum features in the scalar branch
     scalar_set: str = "all"              # all | basic (12 physics) | first_study (5: dB mean/std/max, flux, active)
+    material_input: list = field(default_factory=list)  # properties GIVEN to the model (e.g. [diameter, density, mass]); [] = blind
     count_head: str = "regression"       # regression | classification | soft_label | coral
     class_step: int = 5                  # class / threshold spacing for the non-regression heads
     label_sigma: float = 5.0             # soft_label width [particles]
@@ -198,12 +199,22 @@ def level_free(img: np.ndarray, sc: np.ndarray) -> tuple[np.ndarray, np.ndarray]
     return img.astype(np.float16), sc
 
 
-def prepare(img: np.ndarray, sc: np.ndarray, cfg: TrainConfig | dict):
-    """Column selection and optional level removal, shared by training and inference."""
-    get = (lambda k: cfg[k]) if isinstance(cfg, dict) else (lambda k: getattr(cfg, k))
+def prepare(img: np.ndarray, sc: np.ndarray, cfg: TrainConfig | dict, rows: list[dict] | None = None,
+            n_scalars: int | None = None):
+    """Column selection, optional level removal, and — for the 'material known'
+    experiments — the given material properties appended to the scalar branch.
+    ``n_scalars``: number of audio scalars the model was trained with (older models)."""
+    get = (lambda k, d=None: cfg.get(k, d)) if isinstance(cfg, dict) else (lambda k, d=None: getattr(cfg, k, d))
     sc = sc[:, scalar_columns(cfg, sc.shape[1])]
+    if n_scalars is not None:
+        sc = sc[:, :n_scalars]
     if get("level_free"):
         img, sc = level_free(img, sc)
+    names = get("material_input") or []
+    if names:
+        if rows is None:
+            raise ValueError("material_input needs the metadata rows")
+        sc = np.concatenate([sc, D.material_inputs(rows, names)], axis=1)
     return img, sc
 
 
@@ -430,7 +441,7 @@ def train(cfg: TrainConfig, log=print) -> dict:
 
     sim_rows = tr + va + pairs
     img, sc = feats(cfg, sim_rows, Path(cfg.data_dir).name, log)
-    img, sc = prepare(img, sc, cfg)
+    img, sc = prepare(img, sc, cfg, sim_rows)
     y = np.array([r["N"] for r in sim_rows], np.float32) / 100.0
     props = np.stack([D.aux_targets(r) for r in sim_rows])
     mask = np.ones_like(props)
@@ -442,7 +453,7 @@ def train(cfg: TrainConfig, log=print) -> dict:
     def append_real(rr):
         nonlocal img, sc, y, props, mask, is_real
         ri, rs = feats(cfg, rr, "real", log)
-        ri, rs = prepare(ri, rs, cfg)
+        ri, rs = prepare(ri, rs, cfg, rr)
         k0 = len(y)
         img, sc = np.concatenate([img, ri]), np.concatenate([sc, rs])
         yr = np.array([r["N"] for r in rr], np.float32) / 100.0
@@ -554,7 +565,7 @@ def train(cfg: TrainConfig, log=print) -> dict:
             best, best_ep = score, ep
             torch.save({"model": model.state_dict(), "norm": norm.state(), "n_scalars": sc.shape[1],
                         "n_props": props.shape[1], "prop_names": D.AUX_NAMES, "cfg": asdict(cfg),
-                        "in_channels": in_ch,
+                        "in_channels": in_ch, "n_audio_scalars": sc.shape[1] - len(cfg.material_input),
                         "feature_version": FEATURE_VERSION}, out / "model.pt")
         elif ep - best_ep >= cfg.patience:
             log(f"early stop (best epoch {best_ep})")

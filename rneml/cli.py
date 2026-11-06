@@ -9,6 +9,8 @@
     rneml baselines --real-dir PATH                     # RMS / onset / order params / ridge / GBM
     rneml report outputs/*                              # markdown comparison table
     rneml interpret outputs/blind_mel                   # embedding map, probes, band masking
+    rneml suite --v1 data/v1 --bb-fixed data/v1/bb_fixed --multi-rpm data/v1/multi_rpm --real-dir PATH [--cpu]
+    rneml suite-report                                  # outputs/REPORT.md
     rneml predict rec1.wav rec2.wav --run outputs/blind_mel [--run outputs/...]
 """
 
@@ -95,6 +97,19 @@ def main(argv=None):
     p.add_argument("run")
     p.add_argument("--data-dir")
 
+    p = sub.add_parser("suite", help="run the report experiment suite (resumable)")
+    p.add_argument("--v1", required=True, help="main dataset folder (metadata.csv)")
+    p.add_argument("--bb-fixed", help="fixed-material companion set folder")
+    p.add_argument("--multi-rpm", help="multi-condition dataset folder")
+    p.add_argument("--real-dir")
+    p.add_argument("--max-priority", type=int, default=5)
+    p.add_argument("--only", nargs="*")
+    p.add_argument("--budget-hours", type=float)
+    p.add_argument("--cpu", action="store_true", help="width 16, 20 ms frames, 30 epochs")
+    p.add_argument("--threads", type=int)
+
+    p = sub.add_parser("suite-report", help="collect finished experiments into outputs/REPORT.md")
+
     p = sub.add_parser("predict", help="N and material of new recordings")
     p.add_argument("files", nargs="+", help="wav files")
     p.add_argument("--run", action="append", required=True,
@@ -170,6 +185,17 @@ def main(argv=None):
     elif a.cmd == "interpret":
         from rneml.interpret import interpret
         interpret(a.run, a.data_dir)
+    elif a.cmd == "suite":
+        from rneml.suite import report, run_suite
+        common = {"width": 16, "time_pool": 2, "epochs": 30, "patience": 8} if a.cpu else {}
+        if a.threads:
+            common["threads"] = a.threads
+        run_suite({"v1": a.v1, "bb_fixed": a.bb_fixed, "multi_rpm": a.multi_rpm}, a.real_dir,
+                  max_priority=a.max_priority, only=a.only, common=common, budget_hours=a.budget_hours)
+        print(report())
+    elif a.cmd == "suite-report":
+        from rneml.suite import report
+        print(report())
     elif a.cmd == "predict":
         from rneml.infer import format_result, predict_files
         res = predict_files(a.run, a.files)

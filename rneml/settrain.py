@@ -38,7 +38,10 @@ REAL_GAMMA = GAMMA_REF            # first-study recordings: 372 rpm at A = 1.34 
 def _features(cfg, rows, what, log):
     from rneml.train import feats
     img, sc = feats(cfg, rows, what, log)
-    return img, sc[:, scalar_columns(cfg, sc.shape[1])]
+    sc = sc[:, scalar_columns(cfg, sc.shape[1])]
+    if cfg.material_input:                     # 'material known' experiments
+        sc = np.concatenate([sc, D.material_inputs(rows, cfg.material_input)], axis=1)
+    return img, sc
 
 
 def _set_norm(sets, img, sc, gamma, mode, K, rng, n_max=300) -> Norm:

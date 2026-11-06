@@ -67,8 +67,8 @@ def predict_runs(runs: list[Path], rows: list[dict], what: str, device, log=prin
         model, norm, c, ss = load_model(run, device)
         cfg = TrainConfig(**c)
         img, sc = feats(cfg, rows, what, log, gain)
-        img, sc = prepare(img, sc, cfg)
-        sc = sc[:, :len(norm.s_mu)]          # models trained before features were appended
+        n_audio = len(norm.s_mu) - len(cfg.material_input)   # older models: fewer audio scalars
+        img, sc = prepare(img, sc, cfg, rows, n_audio)
         outs.append(predict(model, img, sc, norm, device, crop_frac=cfg.crop_frac,
                             tta_crops=cfg.tta_crops, sigma_scale=ss))
     if len(outs) == 1:
@@ -160,6 +160,7 @@ def evaluate_runs(runs: list[str | Path], cfg, out: str | Path, log=print) -> di
     SP.check_no_leak(rows)
     what = Path(eval_dir).name
     res: dict = {"runs": [str(r) for r in runs], "feature": cfg.feature, "eval_data": str(eval_dir),
+                 "material_input": list(cfg.material_input),
                  "train_subset": cfg.train_subset, "real_train_per_N": cfg.real_train_per_N,
                  "real_unlabeled_per_N": cfg.real_unlabeled_per_N}
     preds = []
