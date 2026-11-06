@@ -397,6 +397,9 @@ def test_suite_parts_cover_every_experiment_once():
     names = [n for part in PARTS.values() for n in part]
     assert len(names) == len(set(names))
     assert set(names) == {e[1] for e in EXPERIMENTS if e[0] <= 5}
+    from rneml.data import DATASETS
+    from rneml.suite import SUITE_TO_HF
+    assert set(SUITE_TO_HF.values()) <= set(DATASETS)
     data_of = {e[1]: e[3] for e in EXPERIMENTS}
     for part, exps in PARTS.items():
         assert {data_of[n] for n in exps} <= set(PART_DATA[part])

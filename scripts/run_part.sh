@@ -12,19 +12,20 @@ R=${REAL_DIR:-real/data-all}
 export HF_TOKEN=${HF_TOKEN:-proxy-injected}
 mkdir -p logs
 LOG=logs/suite_$PART.log
-SETS=$(python3 -c "from rneml.suite import PART_DATA; print(' '.join(PART_DATA['$PART']))")
+SETS=$(python3 -c "from rneml.suite import PART_DATA, SUITE_TO_HF; print(' '.join(SUITE_TO_HF[k] for k in PART_DATA['$PART']))")
 [ -d "$R" ] || { echo "real recordings missing at $R" | tee -a $LOG; exit 1; }
 if [ "${SKIP_FETCH:-0}" != "1" ]; then
   echo "fetch $SETS $(date -u)" >> $LOG
   rneml fetch --dir "$D" --sets $SETS >> $LOG 2>&1 || { echo "FETCH FAILED" >> $LOG; exit 1; }
 fi
-V1=${V1_DIR:-$D}; V1R2=${V1R2_DIR:-$D/v1_r2}; BB=${BB_DIR:-$D/bb_fixed}; MR=${MR_DIR:-$D/multi_rpm}
+# suite "v1" (main data) = dataset v3; the old v1 is the repository root
+V1=${V1_DIR:-$D/v3}; V1OLD=${V1OLD_DIR:-$D}; V1R2=${V1R2_DIR:-$D/v1_r2}; BB=${BB_DIR:-$D/bb_fixed}; MR=${MR_DIR:-$D/multi_rpm}
 if [ "$PART" = "M0" ] && [ "${COMPONENTS:-1}" = "1" ]; then
   echo "COMPONENTS START $(date -u)" >> $LOG
   rneml components --data-dir "$V1" --real-dir "$R" --workers "$(nproc)" >> $LOG 2>&1
 fi
 echo "SUITE PART $PART START $(date -u)" >> $LOG
-rneml suite --part "$PART" --v1 "$V1" --v1-r2 "$V1R2" --bb-fixed "$BB" --multi-rpm "$MR" \
+rneml suite --part "$PART" --v1 "$V1" --v1-old "$V1OLD" --v1-r2 "$V1R2" --bb-fixed "$BB" --multi-rpm "$MR" \
   --real-dir "$R" --size cpu --threads "$(nproc)" --max-priority 5 >> $LOG 2>&1 &
 PID=$!
 while kill -0 $PID 2>/dev/null; do

@@ -5,9 +5,10 @@ Each experiment = a base config + overrides (+ the data it needs). Finished expe
 restarted at any time. ``report()`` collects every finished experiment into
 outputs/REPORT.md, grouped by the question it answers.
 
-Data sets: ``v1`` (single condition, material varied), ``v1_r2`` (the same v1 dynamics
-re-rendered with a per-impact radiation spread), ``bb_fixed`` (first-study BB only),
-``multi_rpm`` (v2, each system at five shaker speeds).
+Data sets (suite keys): ``v1`` = the main single-condition data, material varied — dataset
+v3 (calibrated to the recordings); ``v1_old`` (the first v1, before calibration), ``v1_r2``
+(the old v1 dynamics re-rendered with calibrated acoustics), ``bb_fixed`` (first-study BB
+only), ``multi_rpm`` (v2, each system at five shaker speeds).
 """
 
 from __future__ import annotations
@@ -106,12 +107,19 @@ EXPERIMENTS = [
         ("set_known_size_weight", "multi_rpm", "configs/set_multi_rpm.yaml",
          {"material_input": ["diameter", "density", "mass"], "prop_weight": 0.0}),
     ], start=1)],
-    # R. acoustic domain randomisation: the same v1 dynamics re-rendered (gransim rerender)
+    # R. what the sim2real calibration buys, on the real recordings. The main data ("v1" in
+    # this suite) is dataset v3: dynamics and acoustics calibrated. R0 = the old v1 (before
+    # calibration), R1-R4 = the old v1 dynamics with the calibrated acoustics (v1_r2), so
+    # R0 → R1 is the acoustic part and R1 → A1 the dynamic part of the calibration.
+    # R1-R4: the same old v1 dynamics re-rendered (gransim rerender)
     # with an impact-to-impact radiation spread σ ~ U(0, 1.5), level-neutral (the recorded
     # high-band envelope distribution matches σ ≈ 1.2) and, per clip, synthetic or real
     # recorded BB clicks (real clicks cut the sim-vs-real onset-count gap ~3×). The
     # original v1 audio has σ = 0 and synthetic clicks only.
     # Compare with A1 / A2 / B11 / B8 (same dynamics, same splits) on the real recordings.
+    (2, "R0_v1old_blind", "R", "v1_old", "configs/blind.yaml", {}),
+    (2, "R0_v1old_known_size_weight", "R", "v1_old", "configs/blind.yaml",
+     {"material_input": ["diameter", "density", "mass"], "prop_weight": 0.0}),
     (2, "R1_r2_blind", "R", "v1_r2", "configs/blind.yaml", {}),
     (2, "R2_r2_known_size_weight", "R", "v1_r2", "configs/blind.yaml",
      {"material_input": ["diameter", "density", "mass"], "prop_weight": 0.0}),
@@ -131,6 +139,7 @@ EXPERIMENTS = [
 # only; M3 needs multi_rpm only.
 PARTS = {
     "M0": ["B9_selected_components", "B11_transfer_safe", "B12_transfer_safe_dann", "B10_all_components",
+           "R0_v1old_blind", "R0_v1old_known_size_weight",
            "R1_r2_blind", "R2_r2_known_size_weight", "R3_r2_transfer_safe", "R4_r2_hpss_denoise_dann",
            "A4_first_study_repro", "A5_bb_trained"],
     "M1": ["A1_blind", "A2_known_size_weight", "A3_known_all", "C1_dann", "C2_no_property_heads",
@@ -145,7 +154,10 @@ PARTS = {
     "M3": ["H1_set_per_set", "H2_set_absolute", "H3_set_per_clip", "H4_set_diff_only", "H5_set_no_diff",
            "H6_set_ordered", "H7_set_no_condition_value", "H8_set_known_size_weight"],
 }
-PART_DATA = {"M0": ["v1", "v1_r2", "bb_fixed"], "M1": ["v1"], "M2": ["v1"], "M3": ["multi_rpm"]}
+PART_DATA = {"M0": ["v1", "v1_old", "v1_r2", "bb_fixed"], "M1": ["v1"], "M2": ["v1"], "M3": ["multi_rpm"]}
+# suite data key → data set name on Hugging Face (rneml fetch --sets): the main data "v1" of
+# the suite is dataset v3 (calibrated); the old v1 is the repository root
+SUITE_TO_HF = {"v1": "v3", "v1_old": "v1", "v1_r2": "v1_r2", "bb_fixed": "bb_fixed", "multi_rpm": "multi_rpm"}
 
 GROUP_TITLES = {
     "A": "A. 물질을 알려 주면 얼마나 좋아지나 (블라인드 vs 크기·무게 앎 vs 전부 앎 vs 물질 고정 학습)",
@@ -157,7 +169,7 @@ GROUP_TITLES = {
     "G": "G. 실측 녹음 몇 개에 정답을 붙이면",
     "H": "H. 다중 조건 (5개 rpm) 모델",
     "Z": "Z. 큰 모델 (ResNet + SE + 시간축 트랜스포머)",
-    "R": "R. 음향 도메인 무작위화 (같은 동역학, 충돌별 방사 효율 + 실제 녹음된 충돌음/합성 충돌음을 섞어 다시 합성한 v1)",
+    "R": "R. 실측 보정의 효과 (R0 = 보정 전 v1, R1~R4 = 보정 전 동역학 + 보정한 소리, A = 동역학·소리 모두 보정한 v3)",
     "S": "S. 시드 반복",
 }
 

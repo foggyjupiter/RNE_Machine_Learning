@@ -32,7 +32,7 @@ def main(argv=None):
     p.add_argument("--dir", default="data/v1")
     p.add_argument("--repo", default=None)
     p.add_argument("--no-audio", action="store_true")
-    p.add_argument("--sets", nargs="*", help="only these: v1 bb_fixed multi_rpm v1_r2 (default all)")
+    p.add_argument("--sets", nargs="*", help="only these: v1 v3 bb_fixed multi_rpm v1_r2 (default all)")
 
     p = sub.add_parser("train", help="train and evaluate")
     p.add_argument("--config", default="configs/blind.yaml")
@@ -102,6 +102,7 @@ def main(argv=None):
     p = sub.add_parser("suite", help="run the report experiment suite (resumable)")
     p.add_argument("--v1", required=True, help="main dataset folder (metadata.csv)")
     p.add_argument("--v1-r2", help="v1 re-rendered with a per-impact radiation spread")
+    p.add_argument("--v1-old", help="the first v1 (before calibration), for the R0 experiments")
     p.add_argument("--bb-fixed", help="fixed-material companion set folder")
     p.add_argument("--multi-rpm", help="multi-condition dataset folder")
     p.add_argument("--real-dir")
@@ -207,7 +208,8 @@ def main(argv=None):
         only = a.only
         if a.part:
             only = list(PARTS[a.part]) + list(a.only or [])
-        run_suite({"v1": a.v1, "v1_r2": a.v1_r2, "bb_fixed": a.bb_fixed, "multi_rpm": a.multi_rpm},
+        run_suite({"v1": a.v1, "v1_old": a.v1_old, "v1_r2": a.v1_r2, "bb_fixed": a.bb_fixed,
+                   "multi_rpm": a.multi_rpm},
                   a.real_dir,
                   max_priority=a.max_priority, only=only, common=common, budget_hours=a.budget_hours)
         print(report())
