@@ -49,7 +49,8 @@ LEVEL_SCALARS = [BASIC_SCALARS.index(k) for k in ("db_mean", "db_max", "rms_db")
 @dataclass
 class TrainConfig:
     name: str = "blind_mel"
-    data_dir: str = "data/v1"
+    data_dir: str = "data/v1"            # training / validation data
+    eval_data_dir: str | None = None     # test data (default: data_dir)
     cache_dir: str = "cache"
     out_dir: str = "outputs"
     real_dir: str | None = None          # first-study clips {N}-{k}.wav
@@ -61,6 +62,7 @@ class TrainConfig:
     train_subset: str = "all"            # "all" (blind) or "bb_like" (known-material baseline)
     feature: str = "mel"                 # "mel" or "scalogram"
     use_modulation: bool = True          # modulation-spectrum features in the scalar branch
+    level_free: bool = False             # remove the absolute level (per-clip mean dB, level scalars)
     epochs: int = 60
     batch: int = 32
     lr: float = 1e-3
@@ -130,6 +132,25 @@ def cache_path(cfg: TrainConfig, what: str) -> Path:
     return Path(cfg.cache_dir) / f"{what}_{cfg.feature}_v{FEATURE_VERSION}.npz"
 
 
+def level_free(img: np.ndarray, sc: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Drop the absolute level: per-clip mean dB removed from the image, level scalars zeroed.
+    For deployment with an unknown microphone gain / distance."""
+    img = img.astype(np.float32)
+    img = img - img.mean(axis=(1, 2), keepdims=True)
+    sc = sc.copy()
+    sc[:, LEVEL_SCALARS] = 0.0
+    return img.astype(np.float16), sc
+
+
+def prepare(img: np.ndarray, sc: np.ndarray, cfg: TrainConfig | dict):
+    """Column selection and optional level removal, shared by training and inference."""
+    get = (lambda k: cfg[k]) if isinstance(cfg, dict) else (lambda k: getattr(cfg, k))
+    sc = sc[:, scalar_columns(cfg, sc.shape[1])]
+    if get("level_free"):
+        img, sc = level_free(img, sc)
+    return img, sc
+
+
 def scalar_columns(cfg: TrainConfig | dict, n_total: int) -> np.ndarray:
     use_mod = cfg["use_modulation"] if isinstance(cfg, dict) else cfg.use_modulation
     return np.arange(n_total if use_mod else len(BASIC_SCALARS))
@@ -172,7 +193,7 @@ def _augment(img: torch.Tensor, sc: torch.Tensor, cfg: TrainConfig, norm: Norm, 
         st = torch.randint(0, T - L + 1, (B,), generator=g)
         img = torch.stack([img[b, :, st[b]:st[b] + L] for b in range(B)])
         T = L
-    if cfg.gain_db > 0:
+    if cfg.gain_db > 0 and not cfg.level_free:
         d = (torch.rand(B, generator=g) * 2 - 1) * cfg.gain_db
         img = img + (d / norm.m_sd)[:, None, None].to(img)
         s_sd = torch.as_tensor(norm.s_sd[LEVEL_SCALARS], dtype=sc.dtype)
@@ -308,8 +329,7 @@ def train(cfg: TrainConfig, log=print) -> dict:
     sim_rows = tr + va + pairs
     img, sc = features_for(sim_rows, cache_path(cfg, Path(cfg.data_dir).name), cfg.workers, log,
                            cfg.feature)
-    cols = scalar_columns(cfg, sc.shape[1])
-    sc = sc[:, cols]
+    img, sc = prepare(img, sc, cfg)
     y = np.array([r["N"] for r in sim_rows], np.float32) / 100.0
     props = np.stack([D.aux_targets(r) for r in sim_rows])
     mask = np.ones_like(props)
@@ -321,8 +341,9 @@ def train(cfg: TrainConfig, log=print) -> dict:
     def append_real(rr):
         nonlocal img, sc, y, props, mask, is_real
         ri, rs = features_for(rr, cache_path(cfg, "real"), cfg.workers, log, cfg.feature)
+        ri, rs = prepare(ri, rs, cfg)
         k0 = len(y)
-        img, sc = np.concatenate([img, ri]), np.concatenate([sc, rs[:, cols]])
+        img, sc = np.concatenate([img, ri]), np.concatenate([sc, rs])
         yr = np.array([r["N"] for r in rr], np.float32) / 100.0
         y = np.concatenate([y, yr])
         rp, rm = D.real_property_targets(len(rr))

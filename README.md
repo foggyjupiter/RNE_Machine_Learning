@@ -23,7 +23,18 @@ rneml evaluate outputs/blind_mel --real-dir ../2-1-CNN-/data-all
 rneml train --config configs/blind.yaml --seed 1 --name blind_mel_s1     # 앙상블용 다른 시드
 rneml ensemble outputs/blind_mel outputs/blind_mel_s1 --name ens_mel --real-dir ../2-1-CNN-/data-all
 rneml report outputs/*                           # 실험 비교표 (markdown)
+rneml predict 새녹음.wav --run outputs/blind_mel [--run outputs/blind_scalogram]   # 새 녹음 추정
 ```
+
+`rneml predict` 출력 예:
+```
+새녹음.wav: N = 42.3 ± 4.1
+    diameter  6.2 mm  (1σ: 5.8 – 6.6)
+    density   1.1e+03 kg/m3  (1σ: 900 – 1.4e+03)
+    e_pw      0.78 -  (1σ: 0.7 – 0.86)
+    ...
+```
+새 녹음은 학습 데이터와 같은 조건이어야 합니다: 5×5×7 cm 상자, 372 rpm, 휴대폰 마이크 약 2.7 m.
 
 `--real-dir`에는 1차 연구의 5초 클립 폴더(`{개수}-{번호}.wav`)를 줍니다. 비공개 저장소라면 `huggingface-cli login`을 먼저 하세요.
 특징은 처음 한 번 계산해 `cache/`에 저장합니다.
@@ -34,7 +45,7 @@ rneml report outputs/*                           # 실험 비교표 (markdown)
 | `configs/blind_scalogram.yaml` | 모든 물성, 웨이블릿 스케일로그램 입력 | 1차 연구 최고 표현(웨이블릿)과 멜 비교 |
 | `configs/blind_dann.yaml` | 모든 물성 + 실측 녹음 개수별 5개 (**라벨 없이**) | 정답 없이 실측 소리만으로 시뮬레이션-실측 차이를 줄일 수 있는지 (나머지 10개로 평가) |
 | `configs/blind_real_adapt.yaml` | 모든 물성 + 실측 녹음 개수별 5개 (라벨 포함) | 실측 몇 개에 정답을 붙이면 얼마나 좋아지는지 (나머지 10개로 평가) |
-| `configs/bb_baseline.yaml` | 1차 연구 BB와 비슷한 물성만 (6 mm, 가벼움, e ≈ 0.8) | 1차 연구처럼 물질을 고정했을 때, 물질이 바뀌면 무엇이 깨지는지 보여 주는 비교 기준 |
+| `configs/bb_baseline.yaml` | **물질 고정 동반 데이터셋** `bb_fixed/` (1차 연구 BB만: 6 mm, 0.12 g, e = 0.8) | 1차 연구처럼 물질을 고정해 학습한 모델이, 물질이 바뀐 테스트셋에서 무엇이 깨지는지 보여 주는 비교 기준 (평가는 본 데이터셋) |
 
 ## 방법
 
@@ -65,6 +76,8 @@ rneml report outputs/*                           # 실험 비교표 (markdown)
 - **같은 물성·다른 N 쌍**: 순서가 맞도록 (마진 순위 손실)
 - 증강: 시간 크롭(클립의 80%), SpecAugment, 음량 ±3 dB 이동. 음량은 질량·마이크 게인과 얽혀 있어서 음량 하나에만 기대지 못하게 합니다.
 - **비지도 실측 적응 (DANN)**: 라벨 없는 실측 녹음을 배치에 섞고, 내부 표현에서 시뮬레이션/실측을 구별하는 판별기를 기울기 반전층 뒤에 둡니다. 모델은 판별기를 속이는 방향, 즉 두 도메인을 구별할 수 없는 표현을 배웁니다. 시뮬레이션에만 있는 단서(알려진 sim2real 차이)에 기대지 못하게 하려는 장치입니다.
+
+**음량 무관 옵션** (`level_free: true`): 클립마다 평균 dB를 빼고 음량 특징을 0으로 둡니다. 마이크나 녹음 거리가 바뀌는 상황에 대비한 비교 실험용입니다. 대신 음량에 담긴 개수 정보도 잃습니다.
 
 **추론**
 - 테스트 시 평균(TTA): 전체 클립과 80% 크롭 4개의 예측을 평균합니다.

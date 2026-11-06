@@ -5,6 +5,7 @@
     rneml evaluate outputs/blind_mel [--real-dir PATH]
     rneml ensemble outputs/a outputs/b ... --name ens [--real-dir PATH]
     rneml report outputs/*                              # markdown comparison table
+    rneml predict rec1.wav rec2.wav --run outputs/blind_mel [--run outputs/...]
 """
 
 from __future__ import annotations
@@ -14,6 +15,8 @@ import json
 
 
 def main(argv=None):
+    import sys
+    sys.stdout.reconfigure(line_buffering=True)   # progress visible when piped
     ap = argparse.ArgumentParser(prog="rneml", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -50,6 +53,12 @@ def main(argv=None):
     p = sub.add_parser("report", help="markdown table comparing evaluated runs")
     p.add_argument("runs", nargs="+")
 
+    p = sub.add_parser("predict", help="N and material of new recordings")
+    p.add_argument("files", nargs="+", help="wav files")
+    p.add_argument("--run", action="append", required=True,
+                   help="trained run folder (repeat for an ensemble)")
+    p.add_argument("--json", action="store_true")
+
     a = ap.parse_args(argv)
     if a.cmd == "fetch":
         from rneml.data import REPO_ID, fetch
@@ -79,6 +88,10 @@ def main(argv=None):
     elif a.cmd == "report":
         from rneml.report import compare
         print(compare(a.runs))
+    elif a.cmd == "predict":
+        from rneml.infer import format_result, predict_files
+        res = predict_files(a.run, a.files)
+        print(json.dumps(res, indent=1) if a.json else "\n".join(format_result(r) for r in res))
 
 
 if __name__ == "__main__":

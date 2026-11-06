@@ -106,3 +106,39 @@ def test_tta_views_and_predict_shapes():
     P1 = predict(m, img, sc, Norm(img, sc), "cpu", crop_frac=0.8, tta_crops=4)
     assert P["n"].shape == (5,) and P["props"].shape == (5, len(D.AUX_NAMES))
     assert np.allclose(P["n_std"], 2 * P1["n_std"])
+
+
+def test_level_free_removes_gain():
+    from rneml.train import level_free
+    rng = np.random.default_rng(0)
+    x = (0.05 * rng.standard_normal(SR * 5)).astype(np.float32)
+    S1, S2 = log_mel(x), log_mel(4 * x)
+    s = np.zeros((2, len(SCALAR_NAMES)), np.float32)
+    img, sc = level_free(np.stack([S1, S2]).astype(np.float16), s)
+    d = np.abs(img[0].astype(np.float32) - img[1].astype(np.float32))
+    assert np.percentile(d, 99) < 0.1     # only cells at the -100 dB floor can differ
+
+
+def test_predict_files_end_to_end(tmp_path):
+    from dataclasses import asdict
+
+    from scipy.io import wavfile
+
+    from rneml.infer import format_result, predict_files
+    from rneml.train import Norm, TrainConfig
+
+    rng = np.random.default_rng(0)
+    w = tmp_path / "rec.wav"
+    wavfile.write(w, SR, (0.1 * rng.standard_normal(SR * 6) * 32767).astype(np.int16))
+    run = tmp_path / "run"
+    run.mkdir()
+    m = CountNet(len(SCALAR_NAMES), len(D.AUX_NAMES))
+    norm = Norm(rng.normal(-40, 15, (4, N_MELS, 10)).astype(np.float16),
+                rng.standard_normal((4, len(SCALAR_NAMES))).astype(np.float32))
+    torch.save({"model": m.state_dict(), "norm": norm.state(), "n_scalars": len(SCALAR_NAMES),
+                "n_props": len(D.AUX_NAMES), "cfg": asdict(TrainConfig()),
+                "sigma_scale": {"n": 1.0, "props": [1.0] * len(D.AUX_NAMES)}}, run / "model.pt")
+    r = predict_files([run, run], [str(w)])[0]
+    assert np.isfinite(r["N"]) and r["N_std"] > 0
+    assert set(r["properties"]) == set(D.AUX_NAMES)
+    assert "diameter" in format_result(r)

@@ -44,14 +44,14 @@ def load_model(run: str | Path, device="cpu"):
 
 def predict_runs(runs: list[Path], rows: list[dict], what: str, device, log=print) -> dict:
     """Ensemble prediction of all runs for rows ('what' names the feature cache)."""
-    from rneml.train import cache_path, features_for, predict, scalar_columns, TrainConfig
+    from rneml.train import TrainConfig, cache_path, features_for, predict, prepare
 
     outs = []
     for run in runs:
         model, norm, c, ss = load_model(run, device)
         cfg = TrainConfig(**c)
         img, sc = features_for(rows, cache_path(cfg, what), cfg.workers, log, cfg.feature)
-        sc = sc[:, scalar_columns(cfg, sc.shape[1])]
+        img, sc = prepare(img, sc, cfg)
         outs.append(predict(model, img, sc, norm, device, crop_frac=cfg.crop_frac,
                             tta_crops=cfg.tta_crops, sigma_scale=ss))
     if len(outs) == 1:
@@ -102,9 +102,10 @@ def evaluate_runs(runs: list[str | Path], cfg, out: str | Path, log=print) -> di
     out.mkdir(parents=True, exist_ok=True)
     dev = _device(cfg.device)
     has_props = load_model(runs[0], dev)[0].props is not None
-    rows = D.read_metadata(cfg.data_dir)
-    what = Path(cfg.data_dir).name
-    res: dict = {"runs": [str(r) for r in runs], "feature": cfg.feature,
+    eval_dir = cfg.eval_data_dir or cfg.data_dir
+    rows = D.read_metadata(eval_dir)
+    what = Path(eval_dir).name
+    res: dict = {"runs": [str(r) for r in runs], "feature": cfg.feature, "eval_data": str(eval_dir),
                  "train_subset": cfg.train_subset, "real_train_per_N": cfg.real_train_per_N,
                  "real_unlabeled_per_N": cfg.real_unlabeled_per_N}
     preds = []

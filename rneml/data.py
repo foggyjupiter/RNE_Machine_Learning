@@ -56,9 +56,10 @@ def fetch(local_dir: str | Path, repo_id: str = REPO_ID, audio: bool = True) -> 
     """Download (or update) the dataset; returns the local folder."""
     from huggingface_hub import snapshot_download
 
-    pats = ["metadata.csv", "manifest.jsonl", "sweep_spec.yaml", "README.md"]
+    pats = ["metadata.csv", "manifest.jsonl", "sweep_spec.yaml", "README.md",
+            "bb_fixed/metadata.csv", "bb_fixed/manifest.jsonl", "bb_fixed/sweep_spec.yaml"]
     if audio:
-        pats.append("audio/**")
+        pats += ["audio/**", "bb_fixed/audio/**"]
     return Path(snapshot_download(repo_id, repo_type="dataset", local_dir=str(local_dir),
                                   allow_patterns=pats))
 
@@ -97,8 +98,8 @@ def real_property_targets(n: int) -> tuple[np.ndarray, np.ndarray]:
 
 
 def to_physical(name: str, z: np.ndarray) -> np.ndarray:
-    """Normalised prediction → SI value."""
-    return np.vectorize(PROPERTIES[name][4])(z)
+    """Normalised prediction → SI value (z clipped to ±10 so log-scaled ones cannot overflow)."""
+    return np.vectorize(PROPERTIES[name][4])(np.clip(z, -10.0, 10.0))
 
 
 def real_recordings(folder: str | Path) -> list[dict]:
@@ -120,7 +121,7 @@ def select(rows: list[dict], split: str | list[str], where: dict | None = None) 
     return out
 
 
-def bb_like(rows: list[dict]) -> list[dict]:
+def bb_like(rows: list[dict]) -> list[dict]:  # small subset; prefer the bb_fixed dataset
     """'Known-material' subset resembling the first study (6 mm, light, e ≈ 0.8): the
     baseline that assumes a fixed material, to compare with blind training."""
     return [r for r in rows if abs(r["particle_diameter_m"] - 6e-3) <= 0.6e-3

@@ -1,16 +1,18 @@
-# "Known material" baseline in the style of the first study: trained only on clips
-# whose material resembles the first-study BB (6 mm ± 0.6, light, e ≈ 0.8). Evaluating
-# it on the full test set and on test_ood shows what breaks when the material changes.
+# "Known material" baseline in the style of the first study: trained only on the
+# fixed-material companion set (first-study BB: 6 mm, 0.12 g, e = 0.8, mu = 0.3),
+# evaluated on the varied-material test sets. Shows what breaks when the material
+# changes, and how a BB-only model does on the real BB recordings.
 name: bb_baseline
-data_dir: data/v1
+data_dir: data/v1/bb_fixed      # train / val: fixed material
+eval_data_dir: data/v1          # test / test_ood: unknown material
 real_dir: null
 feature: mel
-train_subset: bb_like
+train_subset: all
 epochs: 60
 batch: 32
 lr: 1.0e-3
-prop_weight: 0.0
+prop_weight: 0.0                # material is constant in training: nothing to learn
 nll_weight: 0.2
 pair_weight: 0.0
 rank_weight: 0.0
-gain_db: 0.0
+gain_db: 3.0
