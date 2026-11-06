@@ -16,6 +16,10 @@ modulus) — MAE in physical units, relative MAE, R², calibration, on test / te
 (N = 0 rows skipped: an empty box has no material). On the real recordings the
 predicted properties are reported next to the known BB values (6 mm, 0.12 g).
 
+Degeneracy diagnostic: correlation of the N error with the diameter / density / mass
+error ("many small" vs "few large" shows up as a negative N-diameter correlation) and
+the relative error of the layer number F = N d²/A versus that of N.
+
 Ensembles (``rneml ensemble``): member means are averaged; the predictive variance is
 the mean member variance plus the variance of the member means.
 """
@@ -82,6 +86,38 @@ def property_metrics(pz: np.ndarray, pz_std: np.ndarray, rs: list[dict]) -> dict
     return out
 
 
+BOX_AREA = 0.05 * 0.05   # container floor area [m²] (5 × 5 cm)
+
+
+def degeneracy(pN: np.ndarray, pz: np.ndarray, rs: list[dict]) -> dict:
+    """Does the model trade N against the material ("many small" vs "few large")?
+
+    corr(N error, property error): negative for diameter means N is overestimated when
+    the diameter is underestimated. Layer number F = N d² / A: if the confusion runs
+    along F, the relative error of F̂ is smaller than that of N̂.
+    """
+    keep = np.array([r["N"] > 0 for r in rs])
+    if keep.sum() < 5:
+        return {}
+    N = np.array([r["N"] for r in rs], float)[keep]
+    eN = pN[keep] - N
+    out = {"corr_N_error_with": {}}
+    for name in ("diameter", "density", "mass"):
+        k = D.AUX_NAMES.index(name)
+        col = D.PROPERTIES[name][0]
+        truth = np.array([r[col] for r in rs], float)[keep]
+        e = np.log(np.maximum(D.to_physical(name, pz[keep, k]), 1e-12)) - np.log(truth)
+        out["corr_N_error_with"][name] = float(np.corrcoef(eN, e)[0, 1])
+    k = D.AUX_NAMES.index("diameter")
+    d_true = np.array([r["particle_diameter_m"] for r in rs], float)[keep]
+    d_pred = D.to_physical("diameter", pz[keep, k])
+    F_true = N * d_true ** 2 / BOX_AREA
+    F_pred = np.maximum(pN[keep], 0) * d_pred ** 2 / BOX_AREA
+    out["rel_mae_N"] = float(np.mean(np.abs(eN) / N))
+    out["rel_mae_layers_F"] = float(np.mean(np.abs(F_pred - F_true) / F_true))
+    return out
+
+
 def _by_material(rs, p, t) -> dict:
     out = {}
     for col in ("particle_diameter_m", "particle_density", "restitution_pw"):
@@ -129,6 +165,7 @@ def evaluate_runs(runs: list[str | Path], cfg, out: str | Path, log=print) -> di
             preds.append(q)
         if split in ("test", "test_ood") and has_props:
             res[f"properties_{split}"] = property_metrics(P["props"], P["props_std"], rs)
+            res[f"degeneracy_{split}"] = degeneracy(P["n"], P["props"], rs)
         if split == "test":
             res["test_by_material"] = _by_material(rs, P["n"], t)
         if split == "pairs":
@@ -167,6 +204,11 @@ def evaluate_runs(runs: list[str | Path], cfg, out: str | Path, log=print) -> di
             r = res[k]
             log(f"{k:9s} N: MAE {r['mae']:.2f}  ±5 {r['within_5']:.2f}  ±10 {r['within_10']:.2f}  "
                 f"bias {r['bias']:+.2f}  σ̄ {r['mean_pred_std']:.1f} (1σ {r['in_1sigma']:.2f})  n={r['n']}")
+    if res.get("degeneracy_test"):
+        dg = res["degeneracy_test"]
+        log("degeneracy (test): corr(N err, diameter err) "
+            f"{dg['corr_N_error_with']['diameter']:+.2f}, rel. error N {dg['rel_mae_N']:.2f} vs "
+            f"layers F {dg['rel_mae_layers_F']:.2f}")
     for k in ("properties_test", "properties_test_ood"):
         if k in res:
             log(k + ": " + ", ".join(f"{n} {v['mae']:.3g} {v['unit']} (R² {v['r2']:.2f})"

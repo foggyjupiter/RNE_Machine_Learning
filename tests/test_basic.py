@@ -142,3 +142,24 @@ def test_predict_files_end_to_end(tmp_path):
     assert np.isfinite(r["N"]) and r["N_std"] > 0
     assert set(r["properties"]) == set(D.AUX_NAMES)
     assert "diameter" in format_result(r)
+
+
+def test_degeneracy_detects_n_diameter_trade():
+    from rneml.evaluate import degeneracy
+    rng = np.random.default_rng(0)
+    rows, pN, pz = [], [], []
+    k = D.AUX_NAMES.index("diameter")
+    for _ in range(200):
+        N, d = int(rng.integers(10, 100)), rng.uniform(4e-3, 8e-3)
+        rows.append({"N": N, "particle_diameter_m": d, "particle_density": 1500.0,
+                     "particle_mass_kg": 1500.0 * np.pi / 6 * d ** 3})
+        f = np.exp(rng.normal(0, 0.15))          # keep N d² fixed: N × f, d / sqrt(f)
+        pN.append(N * f)
+        z = np.zeros(len(D.AUX_NAMES))
+        z[k] = D.PROPERTIES["diameter"][3](d / np.sqrt(f))
+        z[D.AUX_NAMES.index("density")] = D.PROPERTIES["density"][3](1500.0)
+        z[D.AUX_NAMES.index("mass")] = D.PROPERTIES["mass"][3](1500.0 * np.pi / 6 * (d / np.sqrt(f)) ** 3)
+        pz.append(z)
+    out = degeneracy(np.array(pN), np.array(pz), rows)
+    assert out["corr_N_error_with"]["diameter"] < -0.8
+    assert out["rel_mae_layers_F"] < 0.2 * out["rel_mae_N"]
