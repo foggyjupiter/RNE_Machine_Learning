@@ -107,8 +107,10 @@ EXPERIMENTS = [
          {"material_input": ["diameter", "density", "mass"], "prop_weight": 0.0}),
     ], start=1)],
     # R. acoustic domain randomisation: the same v1 dynamics re-rendered (gransim rerender)
-    # with an impact-to-impact radiation spread σ ~ U(0, 1.5), level-neutral — the recorded
-    # high-band envelope distribution matches σ ≈ 1.2, the original v1 audio has σ = 0.
+    # with an impact-to-impact radiation spread σ ~ U(0, 1.5), level-neutral (the recorded
+    # high-band envelope distribution matches σ ≈ 1.2) and, per clip, synthetic or real
+    # recorded BB clicks (real clicks cut the sim-vs-real onset-count gap ~3×). The
+    # original v1 audio has σ = 0 and synthetic clicks only.
     # Compare with A1 / A2 / B11 / B8 (same dynamics, same splits) on the real recordings.
     (2, "R1_r2_blind", "R", "v1_r2", "configs/blind.yaml", {}),
     (2, "R2_r2_known_size_weight", "R", "v1_r2", "configs/blind.yaml",
@@ -134,7 +136,7 @@ GROUP_TITLES = {
     "G": "G. 실측 녹음 몇 개에 정답을 붙이면",
     "H": "H. 다중 조건 (5개 rpm) 모델",
     "Z": "Z. 큰 모델 (ResNet + SE + 시간축 트랜스포머)",
-    "R": "R. 음향 도메인 무작위화 (같은 동역학, 충돌마다 방사 효율이 다른 소리로 다시 합성한 v1)",
+    "R": "R. 음향 도메인 무작위화 (같은 동역학, 충돌별 방사 효율 + 실제 녹음된 충돌음/합성 충돌음을 섞어 다시 합성한 v1)",
     "S": "S. 시드 반복",
 }
 
@@ -161,6 +163,10 @@ def run_suite(paths: dict, real_dir: str | None, out_dir: str = "outputs", max_p
         over = dict(over)
         kind = over.pop("baseline", None)
         params = {**(common or {}), **over}            # the experiment's own settings win
+        # real clips 1-5 per N are development clips (component selection, the simulator's
+        # recorded-click library, unlabeled/labeled adaptation): every experiment is scored
+        # on the same clips 6-15 (21 N × 10 = 210)
+        params.setdefault("real_exclude_per_N", 5)
         if data == "bb_fixed":
             params.setdefault("eval_data_dir", paths.get("v1"))
         cfg = load_config(base, name=name, out_dir=out_dir, data_dir=paths[data], real_dir=real_dir,
@@ -187,7 +193,7 @@ def report(out_dir: str = "outputs") -> str:
             rows.setdefault(group, []).append((name, data, over, json.loads(p.read_text())))
     lines = ["# 실험 결과 요약", "",
              "MAE는 개수 오차(개). test = 학습과 같은 물성 분포의 새 실행, OOD = 학습에 없던 물성 영역, "
-             "real = 1차 연구 실제 녹음(BB, 0~100개; 적응에 쓴 클립 제외). ±5 = 오차 5개 이내 비율. "
+             "real = 1차 연구 실제 녹음(BB, 0~100개)의 개수별 6~15번 클립 210개 (1~5번은 성분 선택·실측 충돌음 라이브러리·적응에 쓰는 개발용이라 모든 실험에서 제외). ±5 = 오차 5개 이내 비율. "
              "R²는 물성 추정. corr(N,d) = N 오차와 지름 오차의 상관(음수면 '작은 입자 여러 개 vs 큰 입자 몇 개' 혼동). "
              "real 속도 기울기 = 같은 N 안에서 실측 가진 속도가 1 Hz 빠를 때 예측이 몇 개 늘어나는지 "
              "(실측 속도는 6.04~6.64 Hz로 흔들림; 0에 가까울수록 속도에 휘둘리지 않음).", ""]
