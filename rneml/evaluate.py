@@ -199,6 +199,37 @@ def _plot(run: Path, preds: list[dict]) -> None:
     fig.tight_layout()
     fig.savefig(run / "pred_vs_true.png", dpi=110)
     plt.close(fig)
+    # real recordings: mean prediction per true N (first-study style calibration curve)
+    q = [x for x in preds if x["split"] == "real"]
+    if q:
+        t = np.array([x["N"] for x in q])
+        p = np.array([x["pred"] for x in q])
+        u = np.unique(t)
+        fig, a = plt.subplots(figsize=(4.6, 4.2))
+        a.errorbar(u, [p[t == n].mean() for n in u], yerr=[p[t == n].std() for n in u], fmt="o-", ms=3)
+        a.plot([0, 100], [0, 100], "k--", lw=1)
+        a.set_xlabel("true N (real BB recordings)")
+        a.set_ylabel("predicted N (mean ± sd over clips)")
+        a.set_title(f"real: MAE {np.abs(p - t).mean():.1f}")
+        fig.tight_layout()
+        fig.savefig(run / "real_by_N.png", dpi=110)
+        plt.close(fig)
+    # how the count error depends on the (unknown) material
+    q = [x for x in preds if x["split"] in ("test", "test_ood") and "diameter" in x]
+    if q:
+        err = np.array([x["pred"] - x["N"] for x in q])
+        cols = [("diameter", 1e3, "diameter [mm]"), ("density", 1.0, "density [kg/m³]"),
+                ("e_pw", 1.0, "e (particle-wall)")]
+        fig, ax = plt.subplots(1, 3, figsize=(12, 3.6))
+        for a, (k, sc, lab) in zip(ax, cols):
+            v = np.array([x[k] for x in q]) * sc
+            a.scatter(v, err, s=5, alpha=0.4, c=[x["N"] for x in q], cmap="viridis")
+            a.axhline(0, color="k", lw=0.8)
+            a.set_xlabel(lab)
+            a.set_ylabel("N error (pred − true)")
+        fig.tight_layout()
+        fig.savefig(run / "error_by_material.png", dpi=110)
+        plt.close(fig)
     q = [x for x in preds if x["split"] == "test" and "props_pred" in x and x["N"] > 0]
     if q:
         keys = [("diameter", "diameter", 1e3, "mm"), ("density", "density", 1.0, "kg/m³"),

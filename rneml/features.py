@@ -3,6 +3,8 @@
 Two time-frequency images are available (``feature`` in the training config):
 
 * ``mel``: log-mel spectrogram at the native 48 kHz, mel bands up to 24 kHz.
+* ``mel22k``: the first-study pipeline's view — resampled to 22.05 kHz, mel up to 11 kHz
+  (ablation: what the 11-24 kHz band adds). Scalar features still use the full band.
 * ``scalogram``: Morlet wavelet scalogram (constant Q, 64 log-spaced bands 100 Hz-22 kHz),
   energy averaged into the same 10 ms frames. The first study found the wavelet
   scalogram best for this signal (short repeated transients) — there at 8 kHz, here
@@ -108,6 +110,19 @@ def log_mel(x: np.ndarray, sr: int = SR) -> np.ndarray:
     return np.maximum(10 * np.log10(M + 1e-12), DB_FLOOR).astype(np.float32)
 
 
+def log_mel_22k(x: np.ndarray, sr: int = SR) -> np.ndarray:
+    """First-study style image: resampled to 22.05 kHz (mel up to 11 kHz), same 10 ms frames
+    and 128 bands. For the ablation 'does the 11-24 kHz band help?'."""
+    y = signal.resample_poly(x, 147, 320).astype(np.float32)        # 48000 → 22050
+    sr2, nfft, hop = 22050, 1024, 220                                 # ≈ 46 ms window, 10 ms hop
+    _, _, Z = signal.stft(y, fs=sr2, window="hann", nperseg=nfft, noverlap=nfft - hop,
+                          boundary="even", padded=True)
+    fb = mel_filterbank(sr2, nfft, N_MELS, F_MIN, sr2 / 2)
+    M = fb @ (np.abs(Z) ** 2).astype(np.float32)
+    S = np.maximum(10 * np.log10(M + 1e-12), DB_FLOOR).astype(np.float32)
+    return S[:, : int(len(x) / sr / 0.01) + 1]
+
+
 SCALO_BANDS = 64
 SCALO_FMIN, SCALO_FMAX = 100.0, 22000.0
 SCALO_Q = 6.0          # centre frequency / bandwidth (Gaussian, σ_f = fc / (2 Q))
@@ -195,7 +210,7 @@ def extract(path: str | Path, kind: str = "mel") -> tuple[np.ndarray, np.ndarray
     """(time-frequency image in dB, scalar features). Scalars always use the log-mel."""
     x = read_audio(path)
     S = log_mel(x)
-    img = S if kind == "mel" else scalogram(x)
+    img = {"mel": lambda: S, "scalogram": lambda: scalogram(x), "mel22k": lambda: log_mel_22k(x)}[kind]()
     return img, np.concatenate([scalar_features(x, S), modulation_features(S)])
 
 
@@ -204,8 +219,8 @@ def build_cache(paths: list[str], out: str | Path, workers: int = 4, log=print,
     """Compute features for all paths into one .npz (image as float16)."""
     from concurrent.futures import ProcessPoolExecutor
 
-    if kind not in ("mel", "scalogram"):
-        raise ValueError("feature must be 'mel' or 'scalogram'")
+    if kind not in ("mel", "scalogram", "mel22k"):
+        raise ValueError("feature must be 'mel', 'scalogram' or 'mel22k'")
     out = Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)
     mels, scal = [None] * len(paths), [None] * len(paths)

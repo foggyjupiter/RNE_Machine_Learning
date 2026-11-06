@@ -33,7 +33,7 @@ def main(argv=None):
     p.add_argument("--epochs", type=int)
     p.add_argument("--name")
     p.add_argument("--device")
-    p.add_argument("--feature", choices=["mel", "scalogram"])
+    p.add_argument("--feature", choices=["mel", "scalogram", "mel22k"])
     p.add_argument("--real-train-per-n", type=int, help="labeled real clips per N for training")
     p.add_argument("--real-unlabeled-per-n", type=int,
                    help="unlabeled real clips per N for domain-adversarial adaptation")
