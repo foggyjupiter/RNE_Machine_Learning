@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from pathlib import Path
 
 
 def main(argv=None):
@@ -62,6 +63,12 @@ def main(argv=None):
     p.add_argument("--real-dir")
     p.add_argument("--name", default="ridge_scalars")
 
+    p = sub.add_parser("gap", help="sim-to-real gap of the hand-crafted features, by N")
+    p.add_argument("--data-dir", required=True)
+    p.add_argument("--real-dir", required=True)
+    p.add_argument("--bb-like", action="store_true", help="compare with BB-like simulated material only")
+    p.add_argument("--out", help="write the result as JSON")
+
     p = sub.add_parser("predict", help="N and material of new recordings")
     p.add_argument("files", nargs="+", help="wav files")
     p.add_argument("--run", action="append", required=True,
@@ -102,6 +109,13 @@ def main(argv=None):
         from rneml.train import load_config
         cfg = load_config(a.config, data_dir=a.data_dir, real_dir=a.real_dir, name=a.name)
         run_ridge(cfg)
+    elif a.cmd == "gap":
+        from rneml.gap import BB_LIKE, gap
+        from rneml.train import TrainConfig
+        res = gap(TrainConfig(data_dir=a.data_dir, real_dir=a.real_dir),
+                  material=BB_LIKE if a.bb_like else None)
+        if a.out:
+            Path(a.out).write_text(json.dumps(res, indent=1))
     elif a.cmd == "predict":
         from rneml.infer import format_result, predict_files
         res = predict_files(a.run, a.files)
