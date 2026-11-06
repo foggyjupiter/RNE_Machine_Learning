@@ -1,0 +1,13 @@
+# Blind (material-agnostic) count estimator: trained on all materials of the
+# simulated dataset, with auxiliary material heads and contrast-pair losses.
+name: blind_v1
+data_dir: data/v1
+real_dir: null            # e.g. ../2-1-CNN-/data-all  (first-study clips {N}-{k}.wav)
+train_subset: all
+epochs: 60
+batch: 32
+lr: 1.0e-3
+aux_weight: 0.5     # material-property heads (diameter, density, e, mu, E)
+pair_weight: 1.0
+rank_weight: 0.5
+gain_db: 3.0
