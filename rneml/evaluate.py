@@ -8,6 +8,11 @@ correlation of σ with |error|:
   test_ood          held-out material region (never trained on)
   test_by_material  N error by diameter / density / wall-restitution tertiles
   same_N_pair_gap   |N̂_a − N̂_b| for equal N and different material (invariance)
+  by_N_range        MAE in N bands 0-19 / 20-49 / 50-79 / 80-100
+  conformal         normalised split-conformal intervals N̂ ± q·σ (q from validation):
+                    coverage vs target (90 %, 95 %) and mean width, also per N band
+  *_gain            the same test clips re-scored with the microphone gain × 0.25…4
+                    (with device clipping) when gain_test is set
   real              first-study recordings (BB, 0-100) — sim-to-real; real clips used
                     for adaptation (labeled or unlabeled) are never scored
 
@@ -47,7 +52,8 @@ def load_model(run: str | Path, device="cpu"):
     return m.to(device).eval(), Norm.from_state(ck["norm"]), c, ck.get("sigma_scale")
 
 
-def predict_runs(runs: list[Path], rows: list[dict], what: str, device, log=print) -> dict:
+def predict_runs(runs: list[Path], rows: list[dict], what: str, device, log=print,
+                 gain: float = 1.0) -> dict:
     """Ensemble prediction of all runs for rows ('what' names the feature cache)."""
     from rneml.train import TrainConfig, cache_path, features_for, predict, prepare
 
@@ -55,7 +61,7 @@ def predict_runs(runs: list[Path], rows: list[dict], what: str, device, log=prin
     for run in runs:
         model, norm, c, ss = load_model(run, device)
         cfg = TrainConfig(**c)
-        img, sc = features_for(rows, cache_path(cfg, what), cfg.workers, log, cfg.feature)
+        img, sc = features_for(rows, cache_path(cfg, what, gain), cfg.workers, log, cfg.feature, gain)
         img, sc = prepare(img, sc, cfg)
         outs.append(predict(model, img, sc, norm, device, crop_frac=cfg.crop_frac,
                             tta_crops=cfg.tta_crops, sigma_scale=ss))
@@ -132,7 +138,8 @@ def _by_material(rs, p, t) -> dict:
 
 def evaluate_runs(runs: list[str | Path], cfg, out: str | Path, log=print) -> dict:
     """Evaluate one run (or an ensemble) with the data/real settings of ``cfg``."""
-    from rneml.train import _device, metrics, real_split
+    from rneml import splits as SP
+    from rneml.train import _device, conformal_metrics, metrics, real_split
 
     runs = [Path(r) for r in runs]
     out = Path(out)
@@ -147,12 +154,17 @@ def evaluate_runs(runs: list[str | Path], cfg, out: str | Path, log=print) -> di
                  "real_unlabeled_per_N": cfg.real_unlabeled_per_N}
     preds = []
     for split in ("test", "test_ood", "pairs"):
-        rs = D.select(rows, split)
+        rs = SP.select_role(rows, split)
         if not rs:
             continue
         P = predict_runs(runs, rs, what, dev, log)
         t = np.array([r["N"] for r in rs], float)
         res[split] = metrics(P["n"], t, P["n_std"])
+        res[split]["conformal"] = conformal_metrics(P["n"], t, P["n_std"], conf)
+        if split in ("test", "test_ood"):
+            for g in cfg.gain_test:
+                Pg = predict_runs(runs, rs, what, dev, log, gain=float(g))
+                res.setdefault(f"{split}_gain", {})[str(g)] = metrics(Pg["n"], t, Pg["n_std"])
         for k, r in enumerate(rs):
             q = {"split": split, "run_id": r["run_id"], "render": r.get("render"), "N": r["N"],
                  "pred": float(P["n"][k]), "pred_std": float(P["n_std"][k]),
@@ -180,6 +192,7 @@ def evaluate_runs(runs: list[str | Path], cfg, out: str | Path, log=print) -> di
         P = predict_runs(runs, real_test, "real", dev, log)
         t = np.array([r["N"] for r in real_test], float)
         res["real"] = metrics(P["n"], t, P["n_std"])
+        res["real"]["conformal"] = conformal_metrics(P["n"], t, P["n_std"], conf)
         res["real_by_N"] = {int(n): {"mean_pred": float(P["n"][t == n].mean()),
                                      "std_of_pred": float(P["n"][t == n].std())} for n in np.unique(t)}
         if has_props:
@@ -202,8 +215,14 @@ def evaluate_runs(runs: list[str | Path], cfg, out: str | Path, log=print) -> di
     for k in ("test", "test_ood", "real"):
         if k in res and res[k].get("n"):
             r = res[k]
+            c90 = r.get("conformal", {}).get("0.1", {})
             log(f"{k:9s} N: MAE {r['mae']:.2f}  ±5 {r['within_5']:.2f}  ±10 {r['within_10']:.2f}  "
-                f"bias {r['bias']:+.2f}  σ̄ {r['mean_pred_std']:.1f} (1σ {r['in_1sigma']:.2f})  n={r['n']}")
+                f"bias {r['bias']:+.2f}  σ̄ {r['mean_pred_std']:.1f} (1σ {r['in_1sigma']:.2f})"
+                + (f"  90% interval: cover {c90['coverage']:.2f} width {c90['mean_width']:.1f}" if c90 else "")
+                + f"  n={r['n']}")
+    for k in ("test_gain", "test_ood_gain"):
+        if k in res:
+            log(k + ": " + ", ".join(f"×{g}: MAE {v['mae']:.2f}" for g, v in res[k].items()))
     if res.get("degeneracy_test"):
         dg = res["degeneracy_test"]
         log("degeneracy (test): corr(N err, diameter err) "

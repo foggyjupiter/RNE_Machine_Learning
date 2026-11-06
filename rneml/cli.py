@@ -4,6 +4,8 @@
     rneml train   --config configs/blind.yaml [--real-dir PATH] [--feature scalogram]
     rneml evaluate outputs/blind_mel [--real-dir PATH]
     rneml ensemble outputs/a outputs/b ... --name ens [--real-dir PATH]
+    rneml repeat --config configs/blind.yaml --seeds 0 1 2   # mean ± std over seeds
+    rneml compare outputs/a outputs/b                   # paired test on the same clips
     rneml ridge --real-dir PATH                         # non-deep baseline (hand-crafted features)
     rneml report outputs/*                              # markdown comparison table
     rneml predict rec1.wav rec2.wav --run outputs/blind_mel [--run outputs/...]
@@ -57,6 +59,22 @@ def main(argv=None):
     p = sub.add_parser("report", help="markdown table comparing evaluated runs")
     p.add_argument("runs", nargs="+")
 
+    p = sub.add_parser("repeat", help="train the same config with several seeds; mean ± std")
+    p.add_argument("--config", required=True)
+    p.add_argument("--seeds", type=int, nargs="+", default=[0, 1, 2])
+    p.add_argument("--data-dir")
+    p.add_argument("--real-dir")
+    p.add_argument("--name")
+    p.add_argument("--threads", type=int)
+    p.add_argument("--width", type=int)
+    p.add_argument("--time-pool", type=int)
+    p.add_argument("--epochs", type=int)
+
+    p = sub.add_parser("compare", help="paired comparison of two evaluated runs (same clips)")
+    p.add_argument("run_a")
+    p.add_argument("run_b")
+    p.add_argument("--split", default="test")
+
     p = sub.add_parser("ridge", help="non-deep baseline: ridge on the hand-crafted features")
     p.add_argument("--config", default="configs/blind.yaml")
     p.add_argument("--data-dir")
@@ -104,6 +122,25 @@ def main(argv=None):
     elif a.cmd == "report":
         from rneml.report import compare
         print(compare(a.runs))
+    elif a.cmd == "repeat":
+        from rneml.stats import aggregate
+        from rneml.train import load_config, train
+        base = load_config(a.config, data_dir=a.data_dir, real_dir=a.real_dir, threads=a.threads,
+                           width=a.width, time_pool=a.time_pool, epochs=a.epochs)
+        name = a.name or base.name
+        runs = []
+        for sd in a.seeds:
+            cfg = load_config(a.config, data_dir=a.data_dir, real_dir=a.real_dir, threads=a.threads,
+                              width=a.width, time_pool=a.time_pool, epochs=a.epochs,
+                              seed=sd, name=f"{name}_s{sd}")
+            train(cfg)
+            runs.append(Path(cfg.out_dir) / cfg.name)
+        agg = aggregate(runs)
+        (Path(base.out_dir) / f"{name}_seeds.json").write_text(json.dumps(agg, indent=1))
+        print(json.dumps(agg, indent=1))
+    elif a.cmd == "compare":
+        from rneml.stats import paired_compare
+        print(json.dumps(paired_compare(a.run_a, a.run_b, a.split), indent=1))
     elif a.cmd == "ridge":
         from rneml.baselines import run_ridge
         from rneml.train import load_config

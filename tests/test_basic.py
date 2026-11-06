@@ -163,3 +163,79 @@ def test_degeneracy_detects_n_diameter_trade():
     out = degeneracy(np.array(pN), np.array(pz), rows)
     assert out["corr_N_error_with"]["diameter"] < -0.8
     assert out["rel_mae_layers_F"] < 0.2 * out["rel_mae_N"]
+
+
+def _fake_rows(n_runs=60, seed=0):
+    rng = np.random.default_rng(seed)
+    rows = []
+    for i in range(n_runs):
+        N = int(rng.integers(0, 101))
+        mat = {"restitution_pw": rng.uniform(0.55, 0.92), "particle_diameter_m": rng.uniform(4e-3, 8e-3)}
+        split = rng.choice(["train", "val", "test", "test_ood"], p=[0.7, 0.1, 0.1, 0.1])
+        for k in range(4):
+            rows.append({"run_id": f"r{i:03d}", "render": k, "N": N, "split": str(split),
+                         "pair_id": "", **mat})
+    for j in range(5):   # one same_N pair per j
+        N = int(rng.integers(0, 101))
+        for side in "ab":
+            for k in range(4):
+                rows.append({"run_id": f"pN{j}{side}", "render": k, "N": N, "split": "pairs",
+                             "pair_id": f"pN{j}", "restitution_pw": rng.uniform(0.55, 0.92),
+                             "particle_diameter_m": 6e-3})
+    return rows
+
+
+def test_splits_never_leak_and_respect_ranges():
+    from rneml import splits as SP
+    rows = _fake_rows()
+    specs = [None,
+             {"kind": "material_extrap", "axis": "restitution_pw", "lo": 0.55, "hi": 0.75},
+             {"kind": "material_band", "axis": "particle_diameter_m", "lo": 5.5e-3, "hi": 6.5e-3},
+             {"kind": "count_extrap", "n_train_max": 70, "n_test_min": 80},
+             {"kind": "count_sparse", "step": 10, "halfwidth": 1}]
+    for spec in specs:
+        a = SP.assign(rows, spec, seed=0)
+        SP.check_no_leak(a)
+        tr, te = SP.select_role(a, "train") + SP.select_role(a, "val"), SP.select_role(a, "test")
+        if spec and spec["kind"] == "material_extrap":
+            assert all(0.55 <= r["restitution_pw"] <= 0.75 for r in tr)
+            assert all(not (0.55 <= r["restitution_pw"] <= 0.75) for r in te)
+        if spec and spec["kind"] == "count_extrap":
+            assert max(r["N"] for r in tr) <= 70 and min(r["N"] for r in te) >= 80
+        if spec and spec["kind"] == "count_sparse":
+            assert all(abs(r["N"] - 10 * round(r["N"] / 10)) <= 1 for r in tr)
+            assert all(abs(r["N"] - 10 * round(r["N"] / 10)) >= 3 for r in te)
+    bad = SP.assign(rows, None)
+    bad[0] = {**bad[0], "role": "test" if bad[0]["role"] != "test" else "train"}
+    import pytest
+    with pytest.raises(AssertionError):
+        SP.check_no_leak(bad)
+
+
+def test_conformal_interval_coverage():
+    from rneml.train import conformal_metrics
+    rng = np.random.default_rng(0)
+    true = rng.uniform(0, 100, 5000)
+    std = rng.uniform(2, 8, 5000)
+    pred = true + rng.standard_normal(5000) * std
+    q90 = 1.6449                                    # Gaussian 90 % two-sided
+    c = conformal_metrics(pred, true, std, {"0.1": q90})
+    assert abs(c["0.1"]["coverage"] - 0.90) < 0.02
+
+
+def test_paired_compare_detects_better_run(tmp_path):
+    import json as _json
+
+    from rneml.stats import paired_compare
+    rng = np.random.default_rng(0)
+    for name, noise in (("a", 2.0), ("b", 6.0)):
+        d = tmp_path / name
+        d.mkdir()
+        with open(d / "predictions.jsonl", "w") as fh:
+            for i in range(60):
+                for k in range(4):
+                    N = (i * 7) % 101
+                    fh.write(_json.dumps({"split": "test", "run_id": f"r{i}", "render": k, "N": N,
+                                          "pred": N + rng.standard_normal() * noise}) + "\n")
+    c = paired_compare(tmp_path / "a", tmp_path / "b")
+    assert c["mae_diff_a_minus_b"] < 0 and c["ci95_run_bootstrap"][1] < 0 and c["wilcoxon_p"] < 1e-3

@@ -206,16 +206,22 @@ def modulation_features(S_db: np.ndarray, frame_rate: float = SR / HOP) -> np.nd
     return np.log10(out + 1e-6).ravel()
 
 
-def extract(path: str | Path, kind: str = "mel") -> tuple[np.ndarray, np.ndarray]:
-    """(time-frequency image in dB, scalar features). Scalars always use the log-mel."""
+def extract(path: str | Path, kind: str = "mel", gain: float = 1.0) -> tuple[np.ndarray, np.ndarray]:
+    """(time-frequency image in dB, scalar features). Scalars always use the log-mel.
+
+    ``gain`` ≠ 1 simulates another microphone gain on the recorded file (with the device
+    clipping at ±1), for the gain-perturbation evaluation.
+    """
     x = read_audio(path)
+    if gain != 1.0:
+        x = np.clip(gain * x, -1.0, 1.0).astype(np.float32)
     S = log_mel(x)
     img = {"mel": lambda: S, "scalogram": lambda: scalogram(x), "mel22k": lambda: log_mel_22k(x)}[kind]()
     return img, np.concatenate([scalar_features(x, S), modulation_features(S)])
 
 
 def build_cache(paths: list[str], out: str | Path, workers: int = 4, log=print,
-                kind: str = "mel") -> Path:
+                kind: str = "mel", gain: float = 1.0) -> Path:
     """Compute features for all paths into one .npz (image as float16)."""
     from concurrent.futures import ProcessPoolExecutor
 
@@ -225,7 +231,8 @@ def build_cache(paths: list[str], out: str | Path, workers: int = 4, log=print,
     out.parent.mkdir(parents=True, exist_ok=True)
     mels, scal = [None] * len(paths), [None] * len(paths)
     with ProcessPoolExecutor(max_workers=workers) as ex:
-        for k, (S, s) in enumerate(ex.map(extract, paths, [kind] * len(paths), chunksize=8)):
+        for k, (S, s) in enumerate(ex.map(extract, paths, [kind] * len(paths), [gain] * len(paths),
+                                          chunksize=8)):
             mels[k], scal[k] = S.astype(np.float16), s
             if (k + 1) % 500 == 0:
                 log(f"features {k + 1}/{len(paths)}")

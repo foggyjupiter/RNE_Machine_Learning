@@ -23,6 +23,8 @@ rneml evaluate outputs/blind_mel --real-dir ../2-1-CNN-/data-all
 rneml train --config configs/blind.yaml --seed 1 --name blind_mel_s1     # 앙상블용 다른 시드
 rneml ensemble outputs/blind_mel outputs/blind_mel_s1 --name ens_mel --real-dir ../2-1-CNN-/data-all
 rneml report outputs/*                           # 실험 비교표 (markdown)
+rneml repeat --config configs/blind.yaml --seeds 0 1 2   # 시드 반복, 평균 ± 표준편차
+rneml compare outputs/blind_mel_s0 outputs/blind_scalogram_s0   # 같은 클립에서 짝지은 검정
 rneml predict 새녹음.wav --run outputs/blind_mel [--run outputs/blind_scalogram]   # 새 녹음 추정
 ```
 
@@ -86,6 +88,20 @@ GPU가 없으면 `--width 16 --time-pool 2`를 붙이세요. 너비를 절반으
 - σ 사후 보정: 학습 후 검증셋에서 (오차/σ)² 평균이 1이 되도록 각 출력의 σ 배율을 맞춥니다.
 - 앙상블 (`rneml ensemble`): 여러 시드나 입력 표현의 모델을 평균합니다. 불확실성은 각 모델의 σ와 모델 간 의견 차이를 합친 값입니다.
 
+## 분할 (`rneml/splits.py`)
+
+**항상 동역학 실행(`run_id`) 단위로 나눕니다.** 한 실행에서 나온 클립 4개는 같은 궤적이라, 학습과 평가로 쪼개지면 모델이 개수를 세는 대신 궤적을 알아볼 수 있습니다. 모든 분할은 `check_no_leak`로 검사하고(테스트 포함), 분할 결과와 해시를 `split.json`에 저장합니다. 모델 선택(조기 종료, σ 보정, conformal)은 검증셋으로만 합니다.
+
+| `split.kind` | 학습 | 평가 | 검증하는 것 |
+|---|---|---|---|
+| (없음) | 데이터셋의 `split` 열 | `test`, `test_ood` | 기본, 처음 보는 물질 영역 |
+| `material_extrap` | `axis`가 [lo, hi] 안 | 바깥 | 학습 범위 밖 물성 |
+| `material_band` | 구간을 비운 나머지 | 비운 구간 | 물성 공간 중간의 공백 |
+| `count_extrap` | N ≤ 70 | N ≥ 80 | 개수 범위 밖 |
+| `count_sparse` | 10의 배수 ±1 | 그 사이 | 학습에 없던 개수 (연속 추정) |
+
+설정 예: `split: {kind: material_extrap, axis: restitution_pw, lo: 0.55, hi: 0.75}`
+
 ## 평가 (`rneml/evaluate.py`, `outputs/<이름>/metrics.json`)
 
 | 항목 | 의미 |
@@ -99,7 +115,10 @@ GPU가 없으면 `--width 16 --time-pool 2`를 붙이세요. 너비를 절반으
 | `real` | **1차 연구 실제 녹음**(BB, 0~100개, 개수별 15개)에서의 N 오차. 시뮬레이션만으로 학습한 모델이 실측에서 통하는지 |
 | `real_properties` | 실제 녹음에서 추정한 물성과 실제 BB 값(6 mm, 0.12 g) 비교. 반발계수는 실측값이 없으므로 추정치만 보고 |
 
-지표: MAE, RMSE, 편향, ±5개 이내 비율, ±10개 이내 비율 (1차 연구의 ±1, ±2 클래스에 해당).
+지표: MAE, RMSE, 편향, ±5개 이내 비율, ±10개 이내 비율 (1차 연구의 ±1, ±2 클래스에 해당), 개수 구간별 MAE (0-19 / 20-49 / 50-79 / 80-100).
+**예측 구간**: 검증셋으로 정한 conformal 구간 N̂ ± q·σ의 실제 포함률(목표 90 %, 95 %)과 평균 폭, 개수 구간별 폭.
+**게인 교란** (`gain_test: [0.25, 0.5, 2, 4]`): 같은 테스트 클립에 마이크 게인을 곱해(클리핑 포함) 다시 평가합니다.
+**반복과 검정**: `rneml repeat`로 시드를 바꿔 반복하고 평균 ± 표준편차를 냅니다. `rneml compare`는 같은 클립에서의 오차로 윌콕슨 검정과 실행 단위 부트스트랩 신뢰구간을 냅니다.
 그림: `pred_vs_true.png` (예측-정답, ±σ), `properties_test.png` (물성), `real_by_N.png` (실측 녹음 개수별 평균 예측), `error_by_material.png` (N 오차 vs 지름·밀도·반발계수).
 실측 녹음은 적응에 쓴 클립(라벨 유무와 관계없이)을 평가에서 항상 뺍니다.
 

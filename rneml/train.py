@@ -32,6 +32,7 @@ from __future__ import annotations
 import json
 import math
 import time
+import subprocess
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -60,6 +61,10 @@ class TrainConfig:
     dann_weight: float = 0.3             # max weight of the domain-adversarial loss
     real_unlabeled_per_batch: int = 8
     train_subset: str = "all"            # "all" (blind) or "bb_like" (known-material baseline)
+    split: dict | None = None            # see rneml.splits (None = the dataset's split column)
+    split_seed: int = 0                  # same split for every experiment
+    conformal_alpha: list = field(default_factory=lambda: [0.1, 0.05])
+    gain_test: list = field(default_factory=list)   # e.g. [0.25, 0.5, 2, 4] at evaluation
     feature: str = "mel"                 # "mel" or "scalogram"
     use_modulation: bool = True          # modulation-spectrum features in the scalar branch
     level_free: bool = False             # remove the absolute level (per-clip mean dB, level scalars)
@@ -101,7 +106,8 @@ def load_config(path: str | Path | None, **over) -> TrainConfig:
 
 # ----------------------------------------------------------------------------- features
 
-def features_for(rows: list[dict], cache: Path, workers: int, log=print, kind: str = "mel"):
+def features_for(rows: list[dict], cache: Path, workers: int, log=print, kind: str = "mel",
+                 gain: float = 1.0):
     """(image [n,F,T] float16, scalars [n,k]) aligned with rows; computes missing ones."""
     cache = Path(cache)
     paths = [r["path"] for r in rows]
@@ -112,7 +118,7 @@ def features_for(rows: list[dict], cache: Path, workers: int, log=print, kind: s
     missing = [p for p in dict.fromkeys(paths) if p not in have]
     if missing:
         log(f"computing {kind} features for {len(missing)} clips → {cache}")
-        tmp = build_cache(missing, cache.with_suffix(".new.npz"), workers, log, kind)
+        tmp = build_cache(missing, cache.with_suffix(".new.npz"), workers, log, kind, gain)
         n = np.load(tmp)
         if have:
             o = np.load(cache)
@@ -129,8 +135,9 @@ def features_for(rows: list[dict], cache: Path, workers: int, log=print, kind: s
     return z["mel"][idx], z["scalars"][idx]
 
 
-def cache_path(cfg: TrainConfig, what: str) -> Path:
-    return Path(cfg.cache_dir) / f"{what}_{cfg.feature}_v{FEATURE_VERSION}.npz"
+def cache_path(cfg: TrainConfig, what: str, gain: float = 1.0) -> Path:
+    g = "" if gain == 1.0 else f"_gain{gain:g}"
+    return Path(cfg.cache_dir) / f"{what}_{cfg.feature}_v{FEATURE_VERSION}{g}.npz"
 
 
 def level_free(img: np.ndarray, sc: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -263,11 +270,31 @@ def metrics(pred: np.ndarray, true: np.ndarray, std: np.ndarray | None = None) -
     out = {"n": int(len(true)), "mae": float(np.abs(e).mean()), "rmse": float(np.sqrt((e ** 2).mean())),
            "bias": float(e.mean()), "within_5": float((np.abs(e) <= 5).mean()),
            "within_10": float((np.abs(e) <= 10).mean())}
+    rngs = {"0-19": (0, 19), "20-49": (20, 49), "50-79": (50, 79), "80-100": (80, 100)}
+    out["by_N_range"] = {k: float(np.abs(e[(true >= lo) & (true <= hi)]).mean())
+                         for k, (lo, hi) in rngs.items() if ((true >= lo) & (true <= hi)).any()}
     if std is not None and len(std):
         out.update({"mean_pred_std": float(std.mean()),
                     "in_1sigma": float((np.abs(e) <= std).mean()),      # ideal ≈ 0.68
                     "in_2sigma": float((np.abs(e) <= 2 * std).mean()),  # ideal ≈ 0.95
                     "std_err_corr": float(np.corrcoef(std, np.abs(e))[0, 1]) if len(e) > 2 else None})
+    return out
+
+
+def conformal_metrics(pred, true, std, conformal: dict | None) -> dict:
+    """Coverage and width of normalised split-conformal intervals pred ± q·σ."""
+    if not conformal or not len(true):
+        return {}
+    out = {}
+    e = np.abs(pred - true)
+    for a, q in conformal.items():
+        w = q * std
+        ok = e <= w
+        out[a] = {"target": 1 - float(a), "coverage": float(ok.mean()), "mean_width": float(2 * w.mean())}
+        for k, (lo, hi) in {"0-19": (0, 19), "20-49": (20, 49), "50-79": (50, 79), "80-100": (80, 100)}.items():
+            m = (true >= lo) & (true <= hi)
+            if m.any():
+                out[a][f"width_{k}"] = float(2 * w[m].mean())
     return out
 
 
@@ -295,6 +322,12 @@ def calibrate(model, img, sc, y, props, mask, norm, dev, cfg) -> dict:
     P = predict(model, img, sc, norm, dev, crop_frac=cfg.crop_frac, tta_crops=cfg.tta_crops)
     zn = ((P["n"] - y * 100) / P["n_std"]) ** 2
     out = {"n": float(np.sqrt(zn.mean()))}
+    # normalised split conformal: q = finite-sample quantile of |error| / σ_calibrated
+    r = np.sort(np.abs(P["n"] - y * 100) / (P["n_std"] * out["n"]))
+    out["conformal"] = {}
+    for a in cfg.conformal_alpha:
+        k = min(len(r) - 1, int(np.ceil((len(r) + 1) * (1 - a))) - 1)
+        out["conformal"][str(a)] = float(r[k]) if len(r) else float("nan")
     if props.shape[1]:
         zp = ((P["props"] - props) / P["props_std"]) ** 2
         m = mask.astype(bool)
@@ -315,13 +348,24 @@ def train(cfg: TrainConfig, log=print) -> dict:
     out = Path(cfg.out_dir) / cfg.name
     out.mkdir(parents=True, exist_ok=True)
     (out / "config.yaml").write_text(yaml.safe_dump(asdict(cfg), sort_keys=False))
+    try:
+        commit = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True,
+                                cwd=Path(__file__).parent).stdout.strip()
+    except Exception:
+        commit = ""
+    (out / "provenance.json").write_text(json.dumps({"git_commit": commit, "seed": cfg.seed}))
 
-    rows = D.read_metadata(cfg.data_dir)
-    tr = D.select(rows, "train")
+    from rneml import splits as SP
+
+    rows = SP.assign(D.read_metadata(cfg.data_dir), cfg.split, cfg.split_seed)
+    SP.check_no_leak(rows)
+    split_hash = SP.save(rows, cfg.split, cfg.split_seed, out / "split.json")
+    tr = SP.select_role(rows, "train")
     if cfg.train_subset == "bb_like":
         tr = D.bb_like(tr)
-    va = D.select(rows, "val")
-    pairs = D.select(rows, "pairs")
+    va = SP.select_role(rows, "val")
+    pairs = SP.select_role(rows, "pairs")
+    log(f"split {cfg.split or 'default'} (hash {split_hash})")
     real_lab, real_unl, _ = real_split(cfg)
     log(f"train {len(tr)} sim clips (+{len(real_lab)} labeled real ×{cfg.real_repeat}, "
         f"{len(real_unl)} unlabeled real), val {len(va)}, pairs {len(pairs)} "
