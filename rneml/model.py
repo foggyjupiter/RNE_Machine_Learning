@@ -13,6 +13,10 @@ mean and a log-variance (heteroscedastic regression):
   props   material properties (diameter, density, mass, restitution pp/pw,
           friction pp/pw, modulus), normalised
 
+Optional domain-adversarial head: a sim-vs-real classifier on the embedding behind a
+gradient-reversal layer pushes the embedding to look the same for simulated and real
+recordings (unlabeled real clips suffice).
+
 The variance lets the model say "not sure" where different (N, material) sound alike
 (e.g. many small vs few large particles), instead of silently averaging.
 
@@ -29,6 +33,22 @@ import torch
 from torch import nn
 
 LOGVAR_MIN, LOGVAR_MAX = -12.0, 4.0
+
+
+class _GradReverse(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x, lam):
+        ctx.lam = lam
+        return x.view_as(x)
+
+    @staticmethod
+    def backward(ctx, g):
+        return -ctx.lam * g, None
+
+
+def grad_reverse(x: torch.Tensor, lam: float) -> torch.Tensor:
+    """Identity forward, gradient × (−lam) backward (domain-adversarial training)."""
+    return _GradReverse.apply(x, lam)
 
 
 class Output(NamedTuple):
@@ -59,6 +79,9 @@ class CountNet(nn.Module):
                                    nn.Linear(256, 128), nn.ReLU(inplace=True))
         self.count = nn.Linear(128, 2)
         self.props = nn.Linear(128, 2 * n_props) if n_props else None
+        # sim-vs-real discriminator for unsupervised domain adaptation (used only when
+        # training with unlabeled real clips; trained through a gradient-reversal layer)
+        self.domain = nn.Sequential(nn.Linear(128, 64), nn.ReLU(inplace=True), nn.Linear(64, 1))
 
     def embed(self, image: torch.Tensor, scalars: torch.Tensor) -> torch.Tensor:
         h = self.conv(image.unsqueeze(1))         # [B, C, F', T']

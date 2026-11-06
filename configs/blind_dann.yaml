@@ -1,0 +1,18 @@
+# Blind model + unsupervised sim-to-real adaptation: 5 first-study clips per N are
+# used WITHOUT labels (domain-adversarial loss on the embedding); the other 10 per N
+# are evaluation only. Needs real_dir.
+name: blind_dann
+data_dir: data/v1
+real_dir: null
+real_unlabeled_per_N: 5
+dann_weight: 0.3
+feature: mel
+train_subset: all
+epochs: 60
+batch: 32
+lr: 1.0e-3
+prop_weight: 0.5
+nll_weight: 0.2
+pair_weight: 1.0
+rank_weight: 0.5
+gain_db: 3.0

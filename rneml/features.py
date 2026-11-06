@@ -39,8 +39,18 @@ DB_FLOOR = -100.0
 CLIP_S = 5.0
 F_SHAKE = 6.2        # first-study working speed (372 rpm)
 
-SCALAR_NAMES = ["db_mean", "db_std", "db_max", "flux", "active_ratio", "kurtosis",
-                "entropy", "fold_peak", "centroid_khz", "onset_rate", "rms_db", "clip_frac"]
+BASIC_SCALARS = ["db_mean", "db_std", "db_max", "flux", "active_ratio", "kurtosis",
+                 "entropy", "fold_peak", "centroid_khz", "onset_rate", "rms_db", "clip_frac"]
+
+# Modulation spectrum: how the energy of each band fluctuates in time. The shaking
+# frequency (6.2 Hz) and its harmonics, and the texture of collision rates, show up as
+# modulation peaks. Relative (level-free) and shift-invariant, so it needs no phase
+# reference and is unaffected by microphone gain or particle mass scaling the level.
+MOD_GROUPS = 16                                  # mel bands grouped 8 by 8
+MOD_EDGES = np.geomspace(0.8, 50.0, 13)          # 12 modulation bins [Hz] (frame rate 100 Hz)
+MOD_NAMES = [f"mod_g{g:02d}_b{b:02d}" for g in range(MOD_GROUPS) for b in range(len(MOD_EDGES) - 1)]
+SCALAR_NAMES = BASIC_SCALARS + MOD_NAMES
+FEATURE_VERSION = 2                              # bump when the cached features change
 
 
 def read_audio(path: str | Path, sr: int = SR, duration: float = CLIP_S) -> np.ndarray:
@@ -166,12 +176,27 @@ def scalar_features(x: np.ndarray, S_db: np.ndarray, sr: int = SR,
                      20 * np.log10(rms + 1e-9), np.mean(np.abs(x) >= 0.99)], np.float32)
 
 
+def modulation_features(S_db: np.ndarray, frame_rate: float = SR / HOP) -> np.ndarray:
+    """[MOD_GROUPS × 12] log modulation-spectrum magnitudes of the band envelopes."""
+    P = 10 ** (S_db / 10)
+    g = P[: (P.shape[0] // MOD_GROUPS) * MOD_GROUPS].reshape(MOD_GROUPS, -1, P.shape[1]).sum(1)
+    g = g / (g.mean(1, keepdims=True) + 1e-20) - 1.0          # relative fluctuation
+    w = np.hanning(g.shape[1])
+    M = np.abs(np.fft.rfft(g * w, axis=1)) / w.sum()
+    f = np.fft.rfftfreq(g.shape[1], 1 / frame_rate)
+    out = np.empty((MOD_GROUPS, len(MOD_EDGES) - 1), np.float32)
+    for b in range(len(MOD_EDGES) - 1):
+        m = (f >= MOD_EDGES[b]) & (f < MOD_EDGES[b + 1])
+        out[:, b] = M[:, m].max(1) if m.any() else 0.0   # peaks (shaking harmonics) kept
+    return np.log10(out + 1e-6).ravel()
+
+
 def extract(path: str | Path, kind: str = "mel") -> tuple[np.ndarray, np.ndarray]:
     """(time-frequency image in dB, scalar features). Scalars always use the log-mel."""
     x = read_audio(path)
     S = log_mel(x)
     img = S if kind == "mel" else scalogram(x)
-    return img, scalar_features(x, S)
+    return img, np.concatenate([scalar_features(x, S), modulation_features(S)])
 
 
 def build_cache(paths: list[str], out: str | Path, workers: int = 4, log=print,

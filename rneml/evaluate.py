@@ -1,4 +1,4 @@
-"""Evaluation of a trained run (writes metrics.json, predictions.jsonl, figures).
+"""Evaluation of a trained run or an ensemble of runs (metrics.json, predictions.jsonl, figures).
 
 Count N — MAE, RMSE, bias, within ±5 / ±10 (first-study ±1 / ±2 classes), and the
 predicted uncertainty: mean σ, fraction of errors within 1σ / 2σ (ideal 0.68 / 0.95),
@@ -8,13 +8,16 @@ correlation of σ with |error|:
   test_ood          held-out material region (never trained on)
   test_by_material  N error by diameter / density / wall-restitution tertiles
   same_N_pair_gap   |N̂_a − N̂_b| for equal N and different material (invariance)
-  real              first-study recordings (BB, 0-100) — sim-to-real; when the run used
-                    real clips for adaptation, only the held-out real clips are scored
+  real              first-study recordings (BB, 0-100) — sim-to-real; real clips used
+                    for adaptation (labeled or unlabeled) are never scored
 
 Material properties (diameter, density, mass, restitution pp/pw, friction pp/pw,
 modulus) — MAE in physical units, relative MAE, R², calibration, on test / test_ood
 (N = 0 rows skipped: an empty box has no material). On the real recordings the
 predicted properties are reported next to the known BB values (6 mm, 0.12 g).
+
+Ensembles (``rneml ensemble``): member means are averaged; the predictive variance is
+the mean member variance plus the variance of the member means.
 """
 
 from __future__ import annotations
@@ -36,7 +39,27 @@ def load_model(run: str | Path, device="cpu"):
     c = ck["cfg"]
     m = CountNet(ck["n_scalars"], ck["n_props"], c["width"], c["dropout"], c["use_scalars"])
     m.load_state_dict(ck["model"])
-    return m.to(device).eval(), Norm.from_state(ck["norm"]), c
+    return m.to(device).eval(), Norm.from_state(ck["norm"]), c, ck.get("sigma_scale")
+
+
+def predict_runs(runs: list[Path], rows: list[dict], what: str, device, log=print) -> dict:
+    """Ensemble prediction of all runs for rows ('what' names the feature cache)."""
+    from rneml.train import cache_path, features_for, predict, scalar_columns, TrainConfig
+
+    outs = []
+    for run in runs:
+        model, norm, c, ss = load_model(run, device)
+        cfg = TrainConfig(**c)
+        img, sc = features_for(rows, cache_path(cfg, what), cfg.workers, log, cfg.feature)
+        sc = sc[:, scalar_columns(cfg, sc.shape[1])]
+        outs.append(predict(model, img, sc, norm, device, crop_frac=cfg.crop_frac,
+                            tta_crops=cfg.tta_crops, sigma_scale=ss))
+    if len(outs) == 1:
+        return outs[0]
+    mean = lambda k: np.mean([o[k] for o in outs], axis=0)
+    var = lambda k, s: np.mean([o[s] ** 2 for o in outs], axis=0) + np.var([o[k] for o in outs], axis=0)
+    return {"n": mean("n"), "n_std": np.sqrt(var("n", "n_std")),
+            "props": mean("props"), "props_std": np.sqrt(var("props", "props_std"))}
 
 
 def property_metrics(pz: np.ndarray, pz_std: np.ndarray, rs: list[dict]) -> dict:
@@ -50,6 +73,7 @@ def property_metrics(pz: np.ndarray, pz_std: np.ndarray, rs: list[dict]) -> dict
         ez = np.abs(pz[keep, k] - zt)
         ss = np.sum((truth - truth.mean()) ** 2)
         out[n] = {"unit": unit, "mae": float(np.abs(pred - truth).mean() * scale),
+                  "mean_guess_mae": float(np.abs(truth - truth.mean()).mean() * scale),
                   "rel_mae": float(np.mean(np.abs(pred - truth) / np.abs(truth))),
                   "r2": float(1 - np.sum((pred - truth) ** 2) / ss) if ss > 0 else None,
                   "in_1sigma": float((ez <= pz_std[keep, k]).mean()),
@@ -69,23 +93,26 @@ def _by_material(rs, p, t) -> dict:
     return out
 
 
-def evaluate_run(run: str | Path, cfg, log=print) -> dict:
-    from rneml.train import _device, cache_path, features_for, metrics, predict, real_split
+def evaluate_runs(runs: list[str | Path], cfg, out: str | Path, log=print) -> dict:
+    """Evaluate one run (or an ensemble) with the data/real settings of ``cfg``."""
+    from rneml.train import _device, metrics, real_split
 
-    run = Path(run)
+    runs = [Path(r) for r in runs]
+    out = Path(out)
+    out.mkdir(parents=True, exist_ok=True)
     dev = _device(cfg.device)
-    model, norm, _ = load_model(run, dev)
+    has_props = load_model(runs[0], dev)[0].props is not None
     rows = D.read_metadata(cfg.data_dir)
-    sim_cache = cache_path(cfg, Path(cfg.data_dir).name)
-    res: dict = {"feature": cfg.feature, "train_subset": cfg.train_subset,
-                 "real_train_per_N": cfg.real_train_per_N}
+    what = Path(cfg.data_dir).name
+    res: dict = {"runs": [str(r) for r in runs], "feature": cfg.feature,
+                 "train_subset": cfg.train_subset, "real_train_per_N": cfg.real_train_per_N,
+                 "real_unlabeled_per_N": cfg.real_unlabeled_per_N}
     preds = []
     for split in ("test", "test_ood", "pairs"):
         rs = D.select(rows, split)
         if not rs:
             continue
-        img, sc = features_for(rs, sim_cache, cfg.workers, log, cfg.feature)
-        P = predict(model, img, sc, norm, dev)
+        P = predict_runs(runs, rs, what, dev, log)
         t = np.array([r["N"] for r in rs], float)
         res[split] = metrics(P["n"], t, P["n_std"])
         for k, r in enumerate(rs):
@@ -94,11 +121,11 @@ def evaluate_run(run: str | Path, cfg, log=print) -> dict:
                  "diameter": r["particle_diameter_m"], "density": r["particle_density"],
                  "e_pw": r["restitution_pw"], "e_pp": r["restitution_pp"],
                  "pair_id": r.get("pair_id", ""), "pair_type": r.get("pair_type", "")}
-            if model.props is not None:
+            if has_props:
                 q["props_pred"] = {n: float(D.to_physical(n, P["props"][k, j]))
                                    for j, n in enumerate(D.AUX_NAMES)}
             preds.append(q)
-        if split in ("test", "test_ood") and model.props is not None:
+        if split in ("test", "test_ood") and has_props:
             res[f"properties_{split}"] = property_metrics(P["props"], P["props_std"], rs)
         if split == "test":
             res["test_by_material"] = _by_material(rs, P["n"], t)
@@ -109,15 +136,14 @@ def evaluate_run(run: str | Path, cfg, log=print) -> dict:
                     same_n.setdefault((r["pair_id"], r["render"]), []).append(P["n"][k])
             d = [abs(v[0] - v[1]) for v in same_n.values() if len(v) == 2]
             res["same_N_pair_gap"] = {"n": len(d), "mean_abs_diff": float(np.mean(d)) if d else None}
-    _, real_test = real_split(cfg)
+    _, _, real_test = real_split(cfg)
     if real_test:
-        img, sc = features_for(real_test, cache_path(cfg, "real"), cfg.workers, log, cfg.feature)
-        P = predict(model, img, sc, norm, dev)
+        P = predict_runs(runs, real_test, "real", dev, log)
         t = np.array([r["N"] for r in real_test], float)
         res["real"] = metrics(P["n"], t, P["n_std"])
         res["real_by_N"] = {int(n): {"mean_pred": float(P["n"][t == n].mean()),
                                      "std_of_pred": float(P["n"][t == n].std())} for n in np.unique(t)}
-        if model.props is not None:
+        if has_props:
             m = t > 0
             res["real_properties"] = {}
             for j, n in enumerate(D.AUX_NAMES):
@@ -129,11 +155,11 @@ def evaluate_run(run: str | Path, cfg, log=print) -> dict:
         for k, r in enumerate(real_test):
             preds.append({"split": "real", "run_id": r["run_id"], "N": r["N"],
                           "pred": float(P["n"][k]), "pred_std": float(P["n_std"][k])})
-    (run / "metrics.json").write_text(json.dumps(res, indent=1))
-    with open(run / "predictions.jsonl", "w") as fh:
+    (out / "metrics.json").write_text(json.dumps(res, indent=1))
+    with open(out / "predictions.jsonl", "w") as fh:
         for q in preds:
             fh.write(json.dumps(q) + "\n")
-    _plot(run, preds)
+    _plot(out, preds)
     for k in ("test", "test_ood", "real"):
         if k in res and res[k].get("n"):
             r = res[k]
@@ -144,6 +170,10 @@ def evaluate_run(run: str | Path, cfg, log=print) -> dict:
             log(k + ": " + ", ".join(f"{n} {v['mae']:.3g} {v['unit']} (R² {v['r2']:.2f})"
                                     for n, v in res[k].items() if v["r2"] is not None))
     return res
+
+
+def evaluate_run(run: str | Path, cfg, log=print) -> dict:
+    return evaluate_runs([run], cfg, run, log)
 
 
 def _plot(run: Path, preds: list[dict]) -> None:
@@ -168,7 +198,6 @@ def _plot(run: Path, preds: list[dict]) -> None:
     fig.tight_layout()
     fig.savefig(run / "pred_vs_true.png", dpi=110)
     plt.close(fig)
-    # property scatter on test
     q = [x for x in preds if x["split"] == "test" and "props_pred" in x and x["N"] > 0]
     if q:
         keys = [("diameter", "diameter", 1e3, "mm"), ("density", "density", 1.0, "kg/m³"),

@@ -19,7 +19,10 @@ Python 3.10 이상, PyTorch 2.2 이상. GPU가 있으면 자동으로 씁니다.
 rneml fetch --dir data/v1                       # 시뮬레이션 데이터셋 다운로드 (약 3 GB)
 rneml train --config configs/blind.yaml --real-dir ../2-1-CNN-/data-all
 rneml train --config configs/bb_baseline.yaml --real-dir ../2-1-CNN-/data-all
-rneml evaluate outputs/blind_v1 --real-dir ../2-1-CNN-/data-all
+rneml evaluate outputs/blind_mel --real-dir ../2-1-CNN-/data-all
+rneml train --config configs/blind.yaml --seed 1 --name blind_mel_s1     # 앙상블용 다른 시드
+rneml ensemble outputs/blind_mel outputs/blind_mel_s1 --name ens_mel --real-dir ../2-1-CNN-/data-all
+rneml report outputs/*                           # 실험 비교표 (markdown)
 ```
 
 `--real-dir`에는 1차 연구의 5초 클립 폴더(`{개수}-{번호}.wav`)를 줍니다. 비공개 저장소라면 `huggingface-cli login`을 먼저 하세요.
@@ -29,7 +32,8 @@ rneml evaluate outputs/blind_v1 --real-dir ../2-1-CNN-/data-all
 |---|---|---|
 | `configs/blind.yaml` | 모든 물성 | **물질을 모르는** 추정기 (본 모델) |
 | `configs/blind_scalogram.yaml` | 모든 물성, 웨이블릿 스케일로그램 입력 | 1차 연구 최고 표현(웨이블릿)과 멜 비교 |
-| `configs/blind_real_adapt.yaml` | 모든 물성 + 실측 녹음 개수별 5개 | 실측 몇 개로 시뮬레이션-실측 차이를 줄일 수 있는지 (나머지 10개로 평가) |
+| `configs/blind_dann.yaml` | 모든 물성 + 실측 녹음 개수별 5개 (**라벨 없이**) | 정답 없이 실측 소리만으로 시뮬레이션-실측 차이를 줄일 수 있는지 (나머지 10개로 평가) |
+| `configs/blind_real_adapt.yaml` | 모든 물성 + 실측 녹음 개수별 5개 (라벨 포함) | 실측 몇 개에 정답을 붙이면 얼마나 좋아지는지 (나머지 10개로 평가) |
 | `configs/bb_baseline.yaml` | 1차 연구 BB와 비슷한 물성만 (6 mm, 가벼움, e ≈ 0.8) | 1차 연구처럼 물질을 고정했을 때, 물질이 바뀌면 무엇이 깨지는지 보여 주는 비교 기준 |
 
 ## 방법
@@ -38,6 +42,7 @@ rneml evaluate outputs/blind_v1 --real-dir ../2-1-CNN-/data-all
 - 48 kHz 로그-멜 스펙트로그램 (128 밴드, 50 Hz~24 kHz, 10 ms 간격). 충돌 에너지 대부분이 8~24 kHz에 있습니다. 1차 연구는 22.05 kHz로 리샘플해서 이 대역 절반을 버렸습니다.
 - dB 기준값을 고정해 절대 음량을 보존합니다 (1차 연구와 동일).
 - 물리 특징 12개: 음량 통계, 스펙트럼 변화량, 활성 프레임 비율, 파형 첨도(ψ3), 스펙트럼 엔트로피(ψ2), 가진 주기로 접은 에너지의 뾰족함, 무게중심, 고역 충돌 검출률, RMS, 클리핑 비율
+- **변조 스펙트럼** 192개 (`use_modulation`): 멜 대역을 16묶음으로 나누고, 각 묶음의 음량이 시간에 따라 어떤 주기로 출렁이는지(0.8~50 Hz, 12구간)를 잽니다. 가진 주파수 6.2 Hz와 배음, 충돌 빈도의 결이 여기에 나타납니다. 1차 연구의 ψ1(주기 앞/뒤 에너지 비)과 위상 집중도를 **위상 기준 없이** 일반화한 것입니다. 상대 변동만 보므로 마이크 게인이나 질량이 바꾸는 음량에 영향을 받지 않습니다.
 
 **입력 표현** (`feature`): `mel` 또는 `scalogram` (모를레 웨이블릿, 상수 Q 64밴드 100 Hz~22 kHz, 10 ms 프레임). 1차 연구에서는 웨이블릿이 가장 좋았지만 8 kHz로 낮춰 계산했습니다. 여기서는 전 대역을 씁니다.
 
@@ -58,7 +63,13 @@ rneml evaluate outputs/blind_v1 --real-dir ../2-1-CNN-/data-all
 - 불확실성: 가우시안 NLL. 평균에는 기울기를 막아서, σ가 평균을 끌어당기지 않고 평균이 얼마나 틀리는지만 배웁니다.
 - **같은 N·다른 물성 쌍**: 두 예측이 같아지도록 (불변성)
 - **같은 물성·다른 N 쌍**: 순서가 맞도록 (마진 순위 손실)
-- 증강: SpecAugment, 음량 ±3 dB 이동. 음량은 질량·마이크 게인과 얽혀 있어서 음량 하나에만 기대지 못하게 합니다.
+- 증강: 시간 크롭(클립의 80%), SpecAugment, 음량 ±3 dB 이동. 음량은 질량·마이크 게인과 얽혀 있어서 음량 하나에만 기대지 못하게 합니다.
+- **비지도 실측 적응 (DANN)**: 라벨 없는 실측 녹음을 배치에 섞고, 내부 표현에서 시뮬레이션/실측을 구별하는 판별기를 기울기 반전층 뒤에 둡니다. 모델은 판별기를 속이는 방향, 즉 두 도메인을 구별할 수 없는 표현을 배웁니다. 시뮬레이션에만 있는 단서(알려진 sim2real 차이)에 기대지 못하게 하려는 장치입니다.
+
+**추론**
+- 테스트 시 평균(TTA): 전체 클립과 80% 크롭 4개의 예측을 평균합니다.
+- σ 사후 보정: 학습 후 검증셋에서 (오차/σ)² 평균이 1이 되도록 각 출력의 σ 배율을 맞춥니다.
+- 앙상블 (`rneml ensemble`): 여러 시드나 입력 표현의 모델을 평균합니다. 불확실성은 각 모델의 σ와 모델 간 의견 차이를 합친 값입니다.
 
 ## 평가 (`rneml/evaluate.py`, `outputs/<이름>/metrics.json`)
 
@@ -72,7 +83,8 @@ rneml evaluate outputs/blind_v1 --real-dir ../2-1-CNN-/data-all
 | `real` | **1차 연구 실제 녹음**(BB, 0~100개, 개수별 15개)에서의 N 오차. 시뮬레이션만으로 학습한 모델이 실측에서 통하는지 |
 | `real_properties` | 실제 녹음에서 추정한 물성과 실제 BB 값(6 mm, 0.12 g) 비교. 반발계수는 실측값이 없으므로 추정치만 보고 |
 
-지표: MAE, RMSE, 편향, ±5개 이내 비율, ±10개 이내 비율 (1차 연구의 ±1, ±2 클래스에 해당). 예측-정답 산점도는 `pred_vs_true.png`입니다.
+지표: MAE, RMSE, 편향, ±5개 이내 비율, ±10개 이내 비율 (1차 연구의 ±1, ±2 클래스에 해당). 예측-정답 산점도는 `pred_vs_true.png`, 물성 산점도는 `properties_test.png`입니다.
+실측 녹음은 적응에 쓴 클립(라벨 유무와 관계없이)을 평가에서 항상 뺍니다.
 
 ## 주의
 
