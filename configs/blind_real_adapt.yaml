@@ -1,0 +1,18 @@
+# Blind model + a few real recordings: 5 first-study clips per N are added to training
+# (N label; diameter, density and mass of the BB known; restitution etc. masked),
+# the other 10 per N are only used for evaluation.
+name: blind_real_adapt
+data_dir: data/v1
+real_dir: null            # required for this config
+real_train_per_N: 5
+real_repeat: 10
+feature: mel
+train_subset: all
+epochs: 60
+batch: 32
+lr: 1.0e-3
+prop_weight: 0.5
+nll_weight: 0.2
+pair_weight: 1.0
+rank_weight: 0.5
+gain_db: 3.0

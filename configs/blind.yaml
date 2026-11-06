@@ -1,13 +1,16 @@
-# Blind (material-agnostic) count estimator: trained on all materials of the
-# simulated dataset, with auxiliary material heads and contrast-pair losses.
-name: blind_v1
+# Blind (material-agnostic) estimator: count N and material properties
+# (diameter, density, mass, restitution, friction, modulus), each with an uncertainty.
+# Trained on all materials of the simulated dataset; no property is an input.
+name: blind_mel
 data_dir: data/v1
-real_dir: null            # e.g. ../2-1-CNN-/data-all  (first-study clips {N}-{k}.wav)
+real_dir: null            # first-study clips {N}-{k}.wav, e.g. ../2-1-CNN-/data-all
+feature: mel              # mel | scalogram
 train_subset: all
 epochs: 60
 batch: 32
 lr: 1.0e-3
-aux_weight: 0.5     # material-property heads (diameter, density, e, mu, E)
-pair_weight: 1.0
-rank_weight: 0.5
+prop_weight: 0.5          # material-property heads
+nll_weight: 0.2           # uncertainty (Gaussian NLL, stop-gradient on the mean)
+pair_weight: 1.0          # same N, other material → same N̂
+rank_weight: 0.5          # same material, other N → correct order
 gain_db: 3.0

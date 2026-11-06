@@ -1,0 +1,14 @@
+# Same as blind.yaml with the wavelet scalogram input (best in the first study).
+name: blind_scalogram
+data_dir: data/v1
+real_dir: null
+feature: scalogram
+train_subset: all
+epochs: 60
+batch: 32
+lr: 1.0e-3
+prop_weight: 0.5
+nll_weight: 0.2
+pair_weight: 1.0
+rank_weight: 0.5
+gain_db: 3.0

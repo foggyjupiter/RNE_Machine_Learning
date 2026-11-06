@@ -1,16 +1,20 @@
-"""Evaluation of a trained run.
+"""Evaluation of a trained run (writes metrics.json, predictions.jsonl, figures).
 
-Material properties (diameter, density, mass, restitution, friction, modulus): MAE in
-physical units and R² on test / test_ood; on the real recordings the predicted
-properties are reported next to the known BB values (6 mm, 0.12 g).
+Count N — MAE, RMSE, bias, within ±5 / ±10 (first-study ±1 / ±2 classes), and the
+predicted uncertainty: mean σ, fraction of errors within 1σ / 2σ (ideal 0.68 / 0.95),
+correlation of σ with |error|:
 
-Reports, for the count N:
-  * test (same material distribution as training, unseen runs)
-  * test_ood (held-out material region: never seen in training)
-  * by material bin (mass and wall restitution tertiles) — how flat is the error?
-  * same_N pairs: |N̂_a − N̂_b| for identical N and different material (invariance)
-  * real first-study recordings (BB, 0-100) — sim-to-real transfer
-and the auxiliary material predictions (correlation with the truth).
+  test              same material distribution as training, unseen runs
+  test_ood          held-out material region (never trained on)
+  test_by_material  N error by diameter / density / wall-restitution tertiles
+  same_N_pair_gap   |N̂_a − N̂_b| for equal N and different material (invariance)
+  real              first-study recordings (BB, 0-100) — sim-to-real; when the run used
+                    real clips for adaptation, only the held-out real clips are scored
+
+Material properties (diameter, density, mass, restitution pp/pw, friction pp/pw,
+modulus) — MAE in physical units, relative MAE, R², calibration, on test / test_ood
+(N = 0 rows skipped: an empty box has no material). On the real recordings the
+predicted properties are reported next to the known BB values (6 mm, 0.12 g).
 """
 
 from __future__ import annotations
@@ -30,118 +34,116 @@ def load_model(run: str | Path, device="cpu"):
 
     ck = torch.load(Path(run) / "model.pt", map_location=device, weights_only=False)
     c = ck["cfg"]
-    m = CountNet(ck["n_scalars"], ck["n_aux"], c["width"], c["dropout"], c["use_scalars"])
+    m = CountNet(ck["n_scalars"], ck["n_props"], c["width"], c["dropout"], c["use_scalars"])
     m.load_state_dict(ck["model"])
     return m.to(device).eval(), Norm.from_state(ck["norm"]), c
 
 
-def _aux_pred(model, mel, sc, norm, device, batch=64):
-    out = []
-    with torch.no_grad():
-        for i in range(0, len(mel), batch):
-            m, s = norm(mel[i:i + batch], sc[i:i + batch])
-            _, a, _ = model(torch.from_numpy(m).to(device), torch.from_numpy(s).to(device))
-            out.append(a.cpu().numpy())
-    return np.concatenate(out)
-
-
-def evaluate_run(run: str | Path, cfg, log=print) -> dict:
-    from rneml.train import _device, features_for, metrics, predict
-
-    run = Path(run)
-    dev = _device(cfg.device)
-    model, norm, _ = load_model(run, dev)
-    rows = D.read_metadata(cfg.data_dir)
-    cache = Path(cfg.cache_dir) / (Path(cfg.data_dir).name + "_features.npz")
-    res: dict = {}
-    preds = []
-    for split in ("test", "test_ood", "pairs"):
-        rs = D.select(rows, split)
-        if not rs:
-            continue
-        mel, sc = features_for(rs, cache, cfg.workers, log)
-        p = predict(model, mel, sc, norm, dev)
-        t = np.array([r["N"] for r in rs], float)
-        res[split] = metrics(p, t)
-        for r, pi in zip(rs, p):
-            preds.append({"split": split, "run_id": r["run_id"], "render": r.get("render"),
-                          "N": r["N"], "pred": float(pi), "mass": r["particle_mass_kg"],
-                          "diameter": r["particle_diameter_m"], "density": r["particle_density"],
-                          "e_pw": r["restitution_pw"], "e_pp": r["restitution_pp"],
-                          "pair_id": r.get("pair_id", ""), "pair_type": r.get("pair_type", "")})
-        if split in ("test", "test_ood") and model.aux is not None:
-            a = _aux_pred(model, mel, sc, norm, dev)
-            res[f"properties_{split}"] = property_metrics(a, rs)
-            if split == "test":
-                res["test_by_material"] = _by_material(rs, p, t)
-        if split == "pairs":
-            same_n = {}
-            for r, pi in zip(rs, p):
-                if r.get("pair_type") == "same_N":
-                    same_n.setdefault((r["pair_id"], r["render"]), []).append(pi)
-            d = [abs(v[0] - v[1]) for v in same_n.values() if len(v) == 2]
-            res["same_N_pair_gap"] = {"n": len(d), "mean_abs_diff": float(np.mean(d)) if d else None}
-    if cfg.real_dir:
-        rr = D.real_recordings(cfg.real_dir)
-        if rr:
-            mel, sc = features_for(rr, Path(cfg.cache_dir) / "real_features.npz", cfg.workers, log)
-            p = predict(model, mel, sc, norm, dev)
-            t = np.array([r["N"] for r in rr], float)
-            res["real"] = metrics(p, t)
-            res["real_by_N"] = {int(n): float(p[t == n].mean()) for n in np.unique(t)}
-            if model.aux is not None:
-                a = _aux_pred(model, mel, sc, norm, dev)
-                m = t > 0  # an empty box has no material
-                res["real_properties"] = {
-                    n: {"pred_median": float(np.median(D.to_physical(n, a[m, k])) * D.PROPERTIES[n][2]),
-                        "pred_iqr": [float(np.percentile(D.to_physical(n, a[m, k]), q) * D.PROPERTIES[n][2])
-                                     for q in (25, 75)],
-                        "unit": D.PROPERTIES[n][1],
-                        "true": (D.REAL_BB[n] * D.PROPERTIES[n][2]) if n in D.REAL_BB else None}
-                    for k, n in enumerate(D.AUX_NAMES)}
-            for r, pi in zip(rr, p):
-                preds.append({"split": "real", "run_id": r["run_id"], "N": r["N"], "pred": float(pi)})
-    (run / "metrics.json").write_text(json.dumps(res, indent=1))
-    with open(run / "predictions.jsonl", "w") as fh:
-        for q in preds:
-            fh.write(json.dumps(q) + "\n")
-    _plot(run, preds)
-    for k in ("test", "test_ood", "real"):
-        if k in res:
-            log(f"{k:9s} N: MAE {res[k]['mae']:.2f}  ±5 {res[k]['within_5']:.2f}  ±10 {res[k]['within_10']:.2f}"
-                f"  bias {res[k]['bias']:+.2f}  (n={res[k]['n']})")
-    for k in ("properties_test", "properties_test_ood"):
-        if k in res:
-            log(k + ": " + ", ".join(f"{n} MAE {v['mae']:.3g} {v['unit']} (R² {v['r2']:.2f})"
-                                    for n, v in res[k].items() if v["r2"] is not None))
-    return res
-
-
-def property_metrics(a: np.ndarray, rs: list[dict]) -> dict:
-    """Per-property error in physical units and R² (rows with N = 0 are skipped)."""
+def property_metrics(pz: np.ndarray, pz_std: np.ndarray, rs: list[dict]) -> dict:
     keep = np.array([r["N"] > 0 for r in rs])
     out = {}
     for k, n in enumerate(D.AUX_NAMES):
         col, unit, scale = D.PROPERTIES[n][:3]
-        truth = np.array([r[col] for r in rs])[keep]
-        pred = D.to_physical(n, a[keep, k])
-        err = (pred - truth) * scale
+        truth = np.array([r[col] for r in rs], float)[keep]
+        pred = D.to_physical(n, pz[keep, k])
+        zt = np.array([D.PROPERTIES[n][3](v) for v in truth])
+        ez = np.abs(pz[keep, k] - zt)
         ss = np.sum((truth - truth.mean()) ** 2)
-        out[n] = {"unit": unit, "mae": float(np.abs(err).mean()),
+        out[n] = {"unit": unit, "mae": float(np.abs(pred - truth).mean() * scale),
                   "rel_mae": float(np.mean(np.abs(pred - truth) / np.abs(truth))),
-                  "r2": float(1 - np.sum((pred - truth) ** 2) / ss) if ss > 0 else None}
+                  "r2": float(1 - np.sum((pred - truth) ** 2) / ss) if ss > 0 else None,
+                  "in_1sigma": float((ez <= pz_std[keep, k]).mean()),
+                  "in_2sigma": float((ez <= 2 * pz_std[keep, k]).mean())}
     return out
 
 
 def _by_material(rs, p, t) -> dict:
     out = {}
     for col in ("particle_diameter_m", "particle_density", "restitution_pw"):
-        v = np.array([r[col] for r in rs])
+        v = np.array([r[col] for r in rs], float)
         q = np.quantile(v, [1 / 3, 2 / 3])
         b = np.digitize(v, q)
         out[col] = [{"bin": int(k), "range": [float(v[b == k].min()), float(v[b == k].max())],
-                     "mae": float(np.abs(p[b == k] - t[b == k]).mean())} for k in range(3) if (b == k).any()]
+                     "mae": float(np.abs(p[b == k] - t[b == k]).mean()), "n": int((b == k).sum())}
+                    for k in range(3) if (b == k).any()]
     return out
+
+
+def evaluate_run(run: str | Path, cfg, log=print) -> dict:
+    from rneml.train import _device, cache_path, features_for, metrics, predict, real_split
+
+    run = Path(run)
+    dev = _device(cfg.device)
+    model, norm, _ = load_model(run, dev)
+    rows = D.read_metadata(cfg.data_dir)
+    sim_cache = cache_path(cfg, Path(cfg.data_dir).name)
+    res: dict = {"feature": cfg.feature, "train_subset": cfg.train_subset,
+                 "real_train_per_N": cfg.real_train_per_N}
+    preds = []
+    for split in ("test", "test_ood", "pairs"):
+        rs = D.select(rows, split)
+        if not rs:
+            continue
+        img, sc = features_for(rs, sim_cache, cfg.workers, log, cfg.feature)
+        P = predict(model, img, sc, norm, dev)
+        t = np.array([r["N"] for r in rs], float)
+        res[split] = metrics(P["n"], t, P["n_std"])
+        for k, r in enumerate(rs):
+            q = {"split": split, "run_id": r["run_id"], "render": r.get("render"), "N": r["N"],
+                 "pred": float(P["n"][k]), "pred_std": float(P["n_std"][k]),
+                 "diameter": r["particle_diameter_m"], "density": r["particle_density"],
+                 "e_pw": r["restitution_pw"], "e_pp": r["restitution_pp"],
+                 "pair_id": r.get("pair_id", ""), "pair_type": r.get("pair_type", "")}
+            if model.props is not None:
+                q["props_pred"] = {n: float(D.to_physical(n, P["props"][k, j]))
+                                   for j, n in enumerate(D.AUX_NAMES)}
+            preds.append(q)
+        if split in ("test", "test_ood") and model.props is not None:
+            res[f"properties_{split}"] = property_metrics(P["props"], P["props_std"], rs)
+        if split == "test":
+            res["test_by_material"] = _by_material(rs, P["n"], t)
+        if split == "pairs":
+            same_n: dict = {}
+            for k, r in enumerate(rs):
+                if r.get("pair_type") == "same_N":
+                    same_n.setdefault((r["pair_id"], r["render"]), []).append(P["n"][k])
+            d = [abs(v[0] - v[1]) for v in same_n.values() if len(v) == 2]
+            res["same_N_pair_gap"] = {"n": len(d), "mean_abs_diff": float(np.mean(d)) if d else None}
+    _, real_test = real_split(cfg)
+    if real_test:
+        img, sc = features_for(real_test, cache_path(cfg, "real"), cfg.workers, log, cfg.feature)
+        P = predict(model, img, sc, norm, dev)
+        t = np.array([r["N"] for r in real_test], float)
+        res["real"] = metrics(P["n"], t, P["n_std"])
+        res["real_by_N"] = {int(n): {"mean_pred": float(P["n"][t == n].mean()),
+                                     "std_of_pred": float(P["n"][t == n].std())} for n in np.unique(t)}
+        if model.props is not None:
+            m = t > 0
+            res["real_properties"] = {}
+            for j, n in enumerate(D.AUX_NAMES):
+                v = D.to_physical(n, P["props"][m, j]) * D.PROPERTIES[n][2]
+                res["real_properties"][n] = {
+                    "unit": D.PROPERTIES[n][1], "pred_median": float(np.median(v)),
+                    "pred_iqr": [float(np.percentile(v, 25)), float(np.percentile(v, 75))],
+                    "true": (D.REAL_BB[n] * D.PROPERTIES[n][2]) if n in D.REAL_BB else None}
+        for k, r in enumerate(real_test):
+            preds.append({"split": "real", "run_id": r["run_id"], "N": r["N"],
+                          "pred": float(P["n"][k]), "pred_std": float(P["n_std"][k])})
+    (run / "metrics.json").write_text(json.dumps(res, indent=1))
+    with open(run / "predictions.jsonl", "w") as fh:
+        for q in preds:
+            fh.write(json.dumps(q) + "\n")
+    _plot(run, preds)
+    for k in ("test", "test_ood", "real"):
+        if k in res and res[k].get("n"):
+            r = res[k]
+            log(f"{k:9s} N: MAE {r['mae']:.2f}  ±5 {r['within_5']:.2f}  ±10 {r['within_10']:.2f}  "
+                f"bias {r['bias']:+.2f}  σ̄ {r['mean_pred_std']:.1f} (1σ {r['in_1sigma']:.2f})  n={r['n']}")
+    for k in ("properties_test", "properties_test_ood"):
+        if k in res:
+            log(k + ": " + ", ".join(f"{n} {v['mae']:.3g} {v['unit']} (R² {v['r2']:.2f})"
+                                    for n, v in res[k].items() if v["r2"] is not None))
+    return res
 
 
 def _plot(run: Path, preds: list[dict]) -> None:
@@ -157,11 +159,30 @@ def _plot(run: Path, preds: list[dict]) -> None:
         q = [x for x in preds if x["split"] == s]
         t = np.array([x["N"] for x in q])
         p = np.array([x["pred"] for x in q])
-        a.scatter(t, p, s=6, alpha=0.5)
+        sd = np.array([x["pred_std"] for x in q])
+        a.errorbar(t, p, yerr=sd, fmt="o", ms=2, alpha=0.4, elinewidth=0.5)
         a.plot([0, 100], [0, 100], "k--", lw=1)
         a.set_title(f"{s}: MAE {np.abs(p - t).mean():.1f}")
         a.set_xlabel("true N")
-        a.set_ylabel("predicted N")
+        a.set_ylabel("predicted N (± σ)")
     fig.tight_layout()
     fig.savefig(run / "pred_vs_true.png", dpi=110)
     plt.close(fig)
+    # property scatter on test
+    q = [x for x in preds if x["split"] == "test" and "props_pred" in x and x["N"] > 0]
+    if q:
+        keys = [("diameter", "diameter", 1e3, "mm"), ("density", "density", 1.0, "kg/m³"),
+                ("e_pw", "e_pw", 1.0, "-"), ("e_pp", "e_pp", 1.0, "-")]
+        fig, ax = plt.subplots(1, len(keys), figsize=(4 * len(keys), 3.8))
+        for a, (pk, tk, sc, unit) in zip(ax, keys):
+            t = np.array([x[tk] for x in q]) * sc
+            p = np.array([x["props_pred"][pk] for x in q]) * sc
+            a.scatter(t, p, s=5, alpha=0.4)
+            lo, hi = t.min(), t.max()
+            a.plot([lo, hi], [lo, hi], "k--", lw=1)
+            a.set_title(f"{pk} [{unit}]")
+            a.set_xlabel("true")
+            a.set_ylabel("predicted")
+        fig.tight_layout()
+        fig.savefig(run / "properties_test.png", dpi=110)
+        plt.close(fig)

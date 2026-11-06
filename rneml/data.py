@@ -84,6 +84,18 @@ def aux_targets(row: dict) -> np.ndarray:
     return np.array([PROPERTIES[n][3](row[PROPERTIES[n][0]]) for n in AUX_NAMES], np.float32)
 
 
+def real_property_targets(n: int) -> tuple[np.ndarray, np.ndarray]:
+    """(normalised targets, mask) for n first-study clips: only the BB's diameter, density
+    and mass are known; restitution, friction and modulus are masked out."""
+    t = np.zeros((n, len(AUX_NAMES)), np.float32)
+    m = np.zeros_like(t)
+    for k, name in enumerate(AUX_NAMES):
+        if name in REAL_BB:
+            t[:, k] = PROPERTIES[name][3](REAL_BB[name])
+            m[:, k] = 1.0
+    return t, m
+
+
 def to_physical(name: str, z: np.ndarray) -> np.ndarray:
     """Normalised prediction → SI value."""
     return np.vectorize(PROPERTIES[name][4])(z)

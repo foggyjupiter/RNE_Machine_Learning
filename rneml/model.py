@@ -1,12 +1,20 @@
-"""CountNet: CNN over the log-mel spectrogram + scalar physics features.
+"""CountNet: CNN over a time-frequency image + scalar physics features.
 
-Conv blocks (3×3 conv, BN, ReLU, max-pool; channels 32-64-128-128) → mean over
+Input: a time-frequency image (log-mel or wavelet scalogram, see features.py) and the
+scalar physics features. **No material property is ever an input** — diameter,
+density, restitution, friction and modulus are only targets.
+
+Conv blocks (3×3 conv, BN, ReLU, max-pool; channels w-2w-4w-4w) → mean over
 frequency → statistics pooling over time (mean, std, max; as in the first study) →
-concatenated with the normalised scalar features → shared MLP → heads:
+concatenated with the normalised scalar features → shared MLP → heads, each giving a
+mean and a log-variance (heteroscedastic regression):
 
-  count   N / 100 (regression; an ordinal quantity, so no classification grid)
-  aux     material properties (diameter, density, mass, restitution pp/pw,
-          friction pp/pw, modulus), normalised — outputs in their own right
+  count   N / 100
+  props   material properties (diameter, density, mass, restitution pp/pw,
+          friction pp/pw, modulus), normalised
+
+The variance lets the model say "not sure" where different (N, material) sound alike
+(e.g. many small vs few large particles), instead of silently averaging.
 
 Predicting the material jointly is the physical route to a material-agnostic count:
 the sound depends on combinations such as (1 − e²)·N, so a model that can name the
@@ -15,8 +23,20 @@ material can also undo its effect on the count.
 
 from __future__ import annotations
 
+from typing import NamedTuple
+
 import torch
 from torch import nn
+
+LOGVAR_MIN, LOGVAR_MAX = -12.0, 4.0
+
+
+class Output(NamedTuple):
+    n: torch.Tensor          # [B]      N / 100
+    n_logvar: torch.Tensor   # [B]
+    props: torch.Tensor      # [B, P]   normalised properties (empty if P = 0)
+    props_logvar: torch.Tensor
+    emb: torch.Tensor        # [B, 128]
 
 
 def block(cin: int, cout: int, pool: tuple[int, int]) -> nn.Sequential:
@@ -26,29 +46,35 @@ def block(cin: int, cout: int, pool: tuple[int, int]) -> nn.Sequential:
 
 
 class CountNet(nn.Module):
-    def __init__(self, n_scalars: int, n_aux: int, width: int = 32, dropout: float = 0.3,
+    def __init__(self, n_scalars: int, n_props: int, width: int = 32, dropout: float = 0.3,
                  use_scalars: bool = True):
         super().__init__()
         w = width
         self.conv = nn.Sequential(block(1, w, (2, 2)), block(w, 2 * w, (2, 2)),
                                   block(2 * w, 4 * w, (2, 2)), block(4 * w, 4 * w, (2, 1)))
         self.use_scalars = use_scalars
+        self.n_props = n_props
         d = 3 * 4 * w + (n_scalars if use_scalars else 0)
         self.trunk = nn.Sequential(nn.Linear(d, 256), nn.ReLU(inplace=True), nn.Dropout(dropout),
                                    nn.Linear(256, 128), nn.ReLU(inplace=True))
-        self.count = nn.Linear(128, 1)
-        self.aux = nn.Linear(128, n_aux) if n_aux else None
+        self.count = nn.Linear(128, 2)
+        self.props = nn.Linear(128, 2 * n_props) if n_props else None
 
-    def embed(self, mel: torch.Tensor, scalars: torch.Tensor) -> torch.Tensor:
-        h = self.conv(mel.unsqueeze(1))          # [B, C, F', T']
-        h = h.mean(dim=2)                         # over frequency
+    def embed(self, image: torch.Tensor, scalars: torch.Tensor) -> torch.Tensor:
+        h = self.conv(image.unsqueeze(1))         # [B, C, F', T']
+        h = h.mean(dim=2)                          # over frequency
         z = torch.cat([h.mean(-1), h.std(-1), h.amax(-1)], dim=1)
         if self.use_scalars:
             z = torch.cat([z, scalars], dim=1)
         return self.trunk(z)
 
-    def forward(self, mel, scalars):
-        e = self.embed(mel, scalars)
-        n = self.count(e).squeeze(1)
-        a = self.aux(e) if self.aux is not None else None
-        return n, a, e
+    def forward(self, image, scalars) -> Output:
+        e = self.embed(image, scalars)
+        c = self.count(e)
+        n, n_lv = c[:, 0], c[:, 1].clamp(LOGVAR_MIN, LOGVAR_MAX)
+        if self.props is not None:
+            p = self.props(e)
+            pm, plv = p[:, :self.n_props], p[:, self.n_props:].clamp(LOGVAR_MIN, LOGVAR_MAX)
+        else:
+            pm = plv = e.new_zeros(e.shape[0], 0)
+        return Output(n, n_lv, pm, plv, e)

@@ -1,6 +1,14 @@
 """Audio → model inputs.
 
-* Log-mel spectrogram at the native 48 kHz, mel bands up to 24 kHz. Most impact
+Two time-frequency images are available (``feature`` in the training config):
+
+* ``mel``: log-mel spectrogram at the native 48 kHz, mel bands up to 24 kHz.
+* ``scalogram``: Morlet wavelet scalogram (constant Q, 64 log-spaced bands 100 Hz-22 kHz),
+  energy averaged into the same 10 ms frames. The first study found the wavelet
+  scalogram best for this signal (short repeated transients) — there at 8 kHz, here
+  over the full band.
+
+Details of the mel image: Most impact
   energy lies at 8-24 kHz (box modes ≈ 9-10 kHz), which the first study discarded by
   resampling to 22.05 kHz.
 * dB with a *fixed* reference (not per-clip max), so the absolute level is kept, as in
@@ -90,6 +98,36 @@ def log_mel(x: np.ndarray, sr: int = SR) -> np.ndarray:
     return np.maximum(10 * np.log10(M + 1e-12), DB_FLOOR).astype(np.float32)
 
 
+SCALO_BANDS = 64
+SCALO_FMIN, SCALO_FMAX = 100.0, 22000.0
+SCALO_Q = 6.0          # centre frequency / bandwidth (Gaussian, σ_f = fc / (2 Q))
+
+
+@lru_cache(maxsize=4)
+def _morlet_bank(n: int, sr: int = SR) -> tuple[np.ndarray, np.ndarray]:
+    """Frequency-domain Gaussian (Morlet) filters on the positive half, unit peak gain."""
+    fc = np.geomspace(SCALO_FMIN, min(SCALO_FMAX, 0.46 * sr), SCALO_BANDS)
+    f = np.fft.rfftfreq(n, 1 / sr)
+    sig = fc / (2 * SCALO_Q)
+    return fc, np.exp(-0.5 * ((f[None, :] - fc[:, None]) / sig[:, None]) ** 2).astype(np.float32)
+
+
+def scalogram(x: np.ndarray, sr: int = SR) -> np.ndarray:
+    """[SCALO_BANDS, frames] wavelet energy in dB re 1, frames of HOP samples."""
+    n = len(x)
+    X = np.fft.rfft(x)
+    _, bank = _morlet_bank(n, sr)
+    frames = n // HOP
+    out = np.empty((SCALO_BANDS, frames), np.float32)
+    full = np.zeros(n, np.complex128)
+    for b in range(SCALO_BANDS):
+        full[:X.size] = 2 * X * bank[b]        # analytic signal: positive frequencies only
+        full[X.size:] = 0
+        env2 = np.abs(np.fft.ifft(full)) ** 2
+        out[b] = env2[:frames * HOP].reshape(frames, HOP).mean(1)
+    return np.maximum(10 * np.log10(out + 1e-12), DB_FLOOR).astype(np.float32)
+
+
 def scalar_features(x: np.ndarray, S_db: np.ndarray, sr: int = SR,
                     f_shake: float = F_SHAKE) -> np.ndarray:
     frame_db = S_db.mean(axis=0)
@@ -128,21 +166,26 @@ def scalar_features(x: np.ndarray, S_db: np.ndarray, sr: int = SR,
                      20 * np.log10(rms + 1e-9), np.mean(np.abs(x) >= 0.99)], np.float32)
 
 
-def extract(path: str | Path) -> tuple[np.ndarray, np.ndarray]:
+def extract(path: str | Path, kind: str = "mel") -> tuple[np.ndarray, np.ndarray]:
+    """(time-frequency image in dB, scalar features). Scalars always use the log-mel."""
     x = read_audio(path)
     S = log_mel(x)
-    return S, scalar_features(x, S)
+    img = S if kind == "mel" else scalogram(x)
+    return img, scalar_features(x, S)
 
 
-def build_cache(paths: list[str], out: str | Path, workers: int = 4, log=print) -> Path:
-    """Compute features for all paths into one .npz (mel as float16)."""
+def build_cache(paths: list[str], out: str | Path, workers: int = 4, log=print,
+                kind: str = "mel") -> Path:
+    """Compute features for all paths into one .npz (image as float16)."""
     from concurrent.futures import ProcessPoolExecutor
 
+    if kind not in ("mel", "scalogram"):
+        raise ValueError("feature must be 'mel' or 'scalogram'")
     out = Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)
     mels, scal = [None] * len(paths), [None] * len(paths)
     with ProcessPoolExecutor(max_workers=workers) as ex:
-        for k, (S, s) in enumerate(ex.map(extract, paths, chunksize=8)):
+        for k, (S, s) in enumerate(ex.map(extract, paths, [kind] * len(paths), chunksize=8)):
             mels[k], scal[k] = S.astype(np.float16), s
             if (k + 1) % 500 == 0:
                 log(f"features {k + 1}/{len(paths)}")

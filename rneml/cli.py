@@ -1,7 +1,7 @@
 """rneml command line.
 
     rneml fetch   --dir data/v1                         # download the simulated dataset
-    rneml train   --config configs/blind.yaml [--real-dir PATH]
+    rneml train   --config configs/blind.yaml [--real-dir PATH] [--feature scalogram]
     rneml evaluate outputs/blind_v1 [--real-dir PATH]
 """
 
@@ -28,6 +28,8 @@ def main(argv=None):
     p.add_argument("--epochs", type=int)
     p.add_argument("--name")
     p.add_argument("--device")
+    p.add_argument("--feature", choices=["mel", "scalogram"])
+    p.add_argument("--real-train-per-n", type=int, help="adapt with this many real clips per N")
 
     p = sub.add_parser("evaluate", help="re-evaluate a trained run")
     p.add_argument("run")
@@ -40,7 +42,8 @@ def main(argv=None):
     elif a.cmd == "train":
         from rneml.train import load_config, train
         cfg = load_config(a.config, data_dir=a.data_dir, real_dir=a.real_dir, epochs=a.epochs,
-                          name=a.name, device=a.device)
+                          name=a.name, device=a.device, feature=a.feature,
+                          real_train_per_N=a.real_train_per_n)
         print(json.dumps(train(cfg), indent=1))
     elif a.cmd == "evaluate":
         from pathlib import Path

@@ -4,7 +4,8 @@ import numpy as np
 import torch
 
 from rneml import data as D
-from rneml.features import HOP, N_MELS, SCALAR_NAMES, SR, log_mel, scalar_features
+from rneml.features import (HOP, N_MELS, SCALAR_NAMES, SCALO_BANDS, SR, _morlet_bank, log_mel,
+                            scalar_features, scalogram)
 from rneml.model import CountNet
 
 
@@ -31,5 +32,32 @@ def test_features_shapes_and_level():
 
 def test_model_forward():
     m = CountNet(len(SCALAR_NAMES), len(D.AUX_NAMES))
-    n, a, e = m(torch.randn(3, N_MELS, 501), torch.randn(3, len(SCALAR_NAMES)))
-    assert n.shape == (3,) and a.shape == (3, len(D.AUX_NAMES)) and e.shape == (3, 128)
+    for F in (N_MELS, SCALO_BANDS):
+        o = m(torch.randn(3, F, 500), torch.randn(3, len(SCALAR_NAMES)))
+        assert o.n.shape == o.n_logvar.shape == (3,)
+        assert o.props.shape == o.props_logvar.shape == (3, len(D.AUX_NAMES))
+        assert o.emb.shape == (3, 128)
+
+
+def test_scalogram_tone_peaks_in_right_band():
+    t = np.arange(SR * 5) / SR
+    x = (0.1 * np.sin(2 * np.pi * 9400 * t)).astype(np.float32)
+    S = scalogram(x)
+    fc, _ = _morlet_bank(len(x))
+    assert S.shape == (SCALO_BANDS, SR * 5 // HOP)
+    assert abs(fc[np.argmax(S.mean(1))] - 9400) / 9400 < 0.06
+
+
+def test_real_property_mask():
+    t, m = D.real_property_targets(4)
+    known = [n for n in D.AUX_NAMES if n in D.REAL_BB]
+    assert m.sum() == 4 * len(known)
+    k = D.AUX_NAMES.index("diameter")
+    assert abs(float(D.to_physical("diameter", t[0, k])) - 6e-3) < 1e-9
+
+
+def test_gaussian_nll_prefers_honest_variance():
+    from rneml.train import _gnll
+    y, mean = torch.zeros(1000), torch.randn(1000) * 0.1     # errors with σ = 0.1
+    l = [float(_gnll(mean, y, torch.full((1000,), 2 * np.log(s))).mean()) for s in (0.03, 0.1, 0.3)]
+    assert l[1] < l[0] and l[1] < l[2]
