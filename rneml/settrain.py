@@ -76,6 +76,11 @@ def train_set(cfg, log=print) -> dict:
     tr = [s for s, r in zip(sets, role) if r == "train"]
     va = [s for s, r in zip(sets, role) if r == "val"]
     pr = [s for s, r in zip(sets, role) if r == "pairs"]
+    if not va and len(tr) > 1:          # e.g. a tiny or extrapolation split: hold out 10 % of train
+        perm = np.random.default_rng(cfg.split_seed).permutation(len(tr))
+        k = max(1, len(tr) // 10)
+        va, tr = [tr[i] for i in perm[:k]], [tr[i] for i in perm[k:]]
+        log(f"no validation systems in this split: {k} training systems used for validation")
     K = max(cfg.max_conditions, max(len(s) for s in sets))
     log(f"sets: train {len(tr)}, val {len(va)}, pair sets {len(pr)}; up to {K} conditions; "
         f"agg={cfg.agg} diff={cfg.diff_path} norm={cfg.norm_mode} cond={cfg.use_condition}")
@@ -180,8 +185,8 @@ def train_set(cfg, log=print) -> dict:
                      "sec": time.time() - t0})
         log(f"ep {ep:3d} loss {tl / max(len(tr), 1):.4f} val MAE {mv.get('mae', float('nan')):.2f} "
             f"({time.time() - t0:.0f}s)")
-        if mv.get("mae", math.inf) < best:
-            best, best_ep = mv["mae"], ep
+        if mv.get("mae", math.inf) < best or best_ep < 0:
+            best, best_ep = mv.get("mae", math.inf), ep
             torch.save({"model": model.state_dict(), "norm": norm.state(), "n_scalars": sc.shape[1],
                         "n_props": props.shape[1], "K": K, "cfg": asdict(cfg), "in_channels": in_ch},
                        out / "model.pt")

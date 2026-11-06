@@ -50,8 +50,10 @@ def load_model(run: str | Path, device="cpu"):
                  c.get("time_pool", 1), c.get("count_head", "regression"), c.get("class_step", 5),
                  ck.get("in_channels", 1), c.get("arch", "cnn"), c.get("temporal", "transformer"))
     sd = dict(ck["model"])
+    expected = m.state_dict().keys()
     for k in ("weight", "bias"):          # checkpoints from before the CountHead refactor
-        if f"count.{k}" in sd:
+        # (the CORAL head has its own count.bias — leave keys the model expects alone)
+        if f"count.{k}" in sd and f"count.{k}" not in expected and f"count.lin.{k}" in expected:
             sd[f"count.lin.{k}"] = sd.pop(f"count.{k}")
     m.load_state_dict(sd)
     return m.to(device).eval(), Norm.from_state(ck["norm"]), c, ck.get("sigma_scale")
