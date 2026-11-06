@@ -101,7 +101,9 @@ def train_set(cfg, log=print) -> dict:
     in_ch = img.shape[1] if img.ndim == 4 else 1
     model = SetCountNet(sc.shape[1], props.shape[1], cfg.width, cfg.dropout, cfg.use_scalars,
                         cfg.time_pool, cfg.agg, cfg.diff_path, cfg.use_condition,
-                        cfg.count_head, cfg.class_step, in_ch).to(dev)
+                        cfg.count_head, cfg.class_step, in_ch, cfg.arch, cfg.temporal).to(dev)
+    use_amp = cfg.amp and dev.type == "cuda"
+    scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
     opt = torch.optim.AdamW(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
     nb = math.ceil(len(tr) / cfg.batch)
     total = max(cfg.epochs * nb, 1)
@@ -130,7 +132,9 @@ def train_set(cfg, log=print) -> dict:
             if cfg.gain_db > 0 and cfg.norm_mode == "absolute":   # same gain for a whole set
                 d = rng.uniform(-cfg.gain_db, cfg.gain_db, len(allsets)).astype(np.float32)
                 I = (I.astype(np.float32) + d.reshape(-1, *([1] * (I.ndim - 1)))).astype(np.float16)
-            o = set_forward(model, I, S, G, M, norm, cfg.norm_mode, dev)
+            with torch.autocast(device_type=dev.type, dtype=torch.float16, enabled=use_amp):
+                o = set_forward(model, I, S, G, M, norm, cfg.norm_mode, dev)
+            o = o._replace(**{k: (v.float() if torch.is_tensor(v) else v) for k, v in o._asdict().items()})
             Ssup = len(bs) + len(pa) + len(pb)
             sup = first(bs + pa + pb)
             yt = torch.from_numpy(y[sup]).to(dev)
@@ -161,10 +165,11 @@ def train_set(cfg, log=print) -> dict:
             if ru:
                 lam = cfg.dann_weight * (2.0 / (1.0 + math.exp(-10 * step / total)) - 1.0)
                 dom = torch.cat([torch.zeros(Ssup), torch.ones(len(ru))]).to(dev)
-                loss = loss + lam * bce(model.domain(grad_reverse(o.emb, 1.0)).squeeze(1), dom)
+                loss = loss + lam * bce(model.domain(grad_reverse(o.emb, 1.0)).squeeze(1).float(), dom)
             opt.zero_grad()
-            loss.backward()
-            opt.step()
+            scaler.scale(loss).backward()
+            scaler.step(opt)
+            scaler.update()
             sched.step()
             step += 1
             tl += float(loss) * len(bs)
@@ -207,7 +212,8 @@ def load_set_model(run, device="cpu"):
     c = ck["cfg"]
     m = SetCountNet(ck["n_scalars"], ck["n_props"], c["width"], c["dropout"], c["use_scalars"],
                     c.get("time_pool", 1), c["agg"], c["diff_path"], c["use_condition"],
-                    c.get("count_head", "regression"), c.get("class_step", 5), ck.get("in_channels", 1))
+                    c.get("count_head", "regression"), c.get("class_step", 5), ck.get("in_channels", 1),
+                    c.get("arch", "cnn"), c.get("temporal", "transformer"))
     m.load_state_dict(ck["model"])
     return m.to(device).eval(), Norm.from_state(ck["norm"]), ck
 

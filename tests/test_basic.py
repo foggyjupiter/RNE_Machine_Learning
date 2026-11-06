@@ -361,3 +361,20 @@ def test_material_inputs_known_and_real():
     assert abs(float(D.to_physical("diameter", m[0, 0])) - 7e-3) < 1e-9
     assert abs(float(D.to_physical("diameter", m[1, 0])) - 6e-3) < 1e-9   # real BB
     assert m[1, 2] == 0.0                                                 # unknown for real → mean
+
+
+def test_full_size_models_and_suite_configs():
+    from rneml.setmodel import SetCountNet
+    from rneml.suite import EXPERIMENTS, SIZES
+    from rneml.train import load_config
+    m = CountNet(len(SCALAR_NAMES), len(D.AUX_NAMES), 8, arch="resnet")
+    o = m(torch.randn(2, N_MELS, 40), torch.randn(2, len(SCALAR_NAMES)))
+    assert o.n.shape == (2,) and o.emb.shape == (2, 128)
+    sm = SetCountNet(len(SCALAR_NAMES), len(D.AUX_NAMES), 8, arch="resnet", temporal="none")
+    o = sm(torch.randn(2, 3, N_MELS, 40), torch.randn(2, 3, len(SCALAR_NAMES)),
+           torch.full((2, 3), 2.07), torch.ones(2, 3, dtype=torch.bool))
+    assert o.n.shape == (2,)
+    for size in SIZES.values():
+        for _, name, _, _, base, over in EXPERIMENTS:
+            over = {k: v for k, v in over.items() if k != "baseline"}
+            load_config(base, name=name, **{**size, **over})

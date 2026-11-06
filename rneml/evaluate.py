@@ -48,7 +48,7 @@ def load_model(run: str | Path, device="cpu"):
     c = ck["cfg"]
     m = CountNet(ck["n_scalars"], ck["n_props"], c["width"], c["dropout"], c["use_scalars"],
                  c.get("time_pool", 1), c.get("count_head", "regression"), c.get("class_step", 5),
-                 ck.get("in_channels", 1))
+                 ck.get("in_channels", 1), c.get("arch", "cnn"), c.get("temporal", "transformer"))
     sd = dict(ck["model"])
     for k in ("weight", "bias"):          # checkpoints from before the CountHead refactor
         if f"count.{k}" in sd:

@@ -83,10 +83,11 @@ class SetCountNet(nn.Module):
     def __init__(self, n_scalars: int, n_props: int, width: int = 32, dropout: float = 0.3,
                  use_scalars: bool = True, time_pool: int = 1, agg: str = "set",
                  diff_path: str = "both", use_condition: bool = True,
-                 count_head: str = "regression", class_step: int = 5, in_channels: int = 1):
+                 count_head: str = "regression", class_step: int = 5, in_channels: int = 1,
+                 arch: str = "cnn", temporal: str = "transformer"):
         super().__init__()
         self.enc = CountNet(n_scalars, 0, width, dropout, use_scalars, time_pool,
-                            in_channels=in_channels)
+                            in_channels=in_channels, arch=arch, temporal=temporal)
         d = 128
         self.agg, self.diff_path, self.use_condition = agg, diff_path, use_condition
         self.n_props = n_props

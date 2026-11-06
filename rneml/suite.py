@@ -18,6 +18,15 @@ from pathlib import Path
 
 ALL_PROPS = ["diameter", "density", "mass", "e_pp", "e_pw", "mu_pp", "mu_pw", "E"]
 
+# size presets (``--size``): light CNN for a CPU, full ResNet for a GPU
+SIZES = {
+    "cpu": {"arch": "cnn", "width": 16, "time_pool": 2, "epochs": 30, "patience": 8},
+    "default": {},
+    "full": {"arch": "resnet", "width": 32, "time_pool": 1, "temporal": "transformer",
+             "epochs": 80, "patience": 15},
+}
+FULL = SIZES["full"]
+
 # (priority, name, group, data, base config, overrides)
 EXPERIMENTS = [
     # A. material knowledge — the central question
@@ -70,6 +79,19 @@ EXPERIMENTS = [
     (4, "H7_set_no_condition_value", "H", "multi_rpm", "configs/set_multi_rpm.yaml", {"use_condition": False}),
     (3, "H8_set_known_size_weight", "H", "multi_rpm", "configs/set_multi_rpm.yaml",
      {"material_input": ["diameter", "density", "mass"], "prop_weight": 0.0}),
+    # Z. full-size models (ResNet + SE + temporal transformer) of the key comparisons —
+    # meant for a GPU (on a 4-core CPU one run takes many hours)
+    *[(6, f"Z{i}_full_{n}", "Z", d, b, {**FULL, **o}) for i, (n, d, b, o) in enumerate([
+        ("blind", "v1", "configs/blind.yaml", {}),
+        ("known_size_weight", "v1", "configs/blind.yaml",
+         {"material_input": ["diameter", "density", "mass"], "prop_weight": 0.0}),
+        ("known_all", "v1", "configs/blind.yaml", {"material_input": ALL_PROPS, "prop_weight": 0.0}),
+        ("hpss_denoise_dann", "v1", "configs/blind.yaml",
+         {"feature": "mel+perc+harm", "denoise": True, "real_unlabeled_per_N": 5}),
+        ("set_per_set", "multi_rpm", "configs/set_multi_rpm.yaml", {}),
+        ("set_known_size_weight", "multi_rpm", "configs/set_multi_rpm.yaml",
+         {"material_input": ["diameter", "density", "mass"], "prop_weight": 0.0}),
+    ], start=1)],
     # S. repeated seeds of the key comparisons
     *[(5, f"S_A1_blind_s{s}", "S", "v1", "configs/blind.yaml", {"seed": s}) for s in (1, 2)],
     *[(5, f"S_A2_known_size_weight_s{s}", "S", "v1", "configs/blind.yaml",
@@ -85,6 +107,7 @@ GROUP_TITLES = {
     "D": "D. 개수 출력 방식 (학습에 없던 개수: count_sparse 분할)",
     "G": "G. 실측 녹음 몇 개에 정답을 붙이면",
     "H": "H. 다중 조건 (5개 rpm) 모델",
+    "Z": "Z. 큰 모델 (ResNet + SE + 시간축 트랜스포머)",
     "S": "S. 시드 반복",
 }
 
@@ -110,9 +133,11 @@ def run_suite(paths: dict, real_dir: str | None, out_dir: str = "outputs", max_p
             continue
         over = dict(over)
         kind = over.pop("baseline", None)
+        params = {**(common or {}), **over}            # the experiment's own settings win
+        if data == "bb_fixed":
+            params.setdefault("eval_data_dir", paths.get("v1"))
         cfg = load_config(base, name=name, out_dir=out_dir, data_dir=paths[data], real_dir=real_dir,
-                          **({"eval_data_dir": paths.get("v1")} if data == "bb_fixed" else {}),
-                          **(common or {}), **over)
+                          **params)
         log(f"=== {name} (priority {prio}, group {group})")
         try:
             run_baseline(cfg, kind, log) if kind else train(cfg, log)

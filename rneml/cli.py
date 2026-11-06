@@ -47,6 +47,7 @@ def main(argv=None):
     p.add_argument("--threads", type=int, help="torch CPU threads")
     p.add_argument("--width", type=int, help="CNN width (32 default; 16 for CPU)")
     p.add_argument("--time-pool", type=int, help="input frame pooling (1 default; 2 for CPU)")
+    p.add_argument("--arch", choices=["cnn", "resnet"], help="light CNN or full-size ResNet")
     p.add_argument("--seed", type=int)
 
     p = sub.add_parser("evaluate", help="re-evaluate a trained run")
@@ -105,7 +106,9 @@ def main(argv=None):
     p.add_argument("--max-priority", type=int, default=5)
     p.add_argument("--only", nargs="*")
     p.add_argument("--budget-hours", type=float)
-    p.add_argument("--cpu", action="store_true", help="width 16, 20 ms frames, 30 epochs")
+    p.add_argument("--size", choices=["cpu", "default", "full"], default="default",
+                   help="cpu: light CNN width 16, 20 ms frames, 30 epochs; full: ResNet + transformer, 80 epochs")
+    p.add_argument("--cpu", action="store_true", help="same as --size cpu")
     p.add_argument("--threads", type=int)
 
     p = sub.add_parser("suite-report", help="collect finished experiments into outputs/REPORT.md")
@@ -126,7 +129,7 @@ def main(argv=None):
                           name=a.name, device=a.device, feature=a.feature,
                           real_train_per_N=a.real_train_per_n,
                           real_unlabeled_per_N=a.real_unlabeled_per_n, threads=a.threads,
-                          seed=a.seed, width=a.width, time_pool=a.time_pool)
+                          seed=a.seed, width=a.width, time_pool=a.time_pool, arch=a.arch)
         print(json.dumps(train(cfg), indent=1))
     elif a.cmd == "evaluate":
         from pathlib import Path
@@ -187,7 +190,8 @@ def main(argv=None):
         interpret(a.run, a.data_dir)
     elif a.cmd == "suite":
         from rneml.suite import report, run_suite
-        common = {"width": 16, "time_pool": 2, "epochs": 30, "patience": 8} if a.cpu else {}
+        from rneml.suite import SIZES
+        common = dict(SIZES["cpu" if a.cpu else a.size])
         if a.threads:
             common["threads"] = a.threads
         run_suite({"v1": a.v1, "bb_fixed": a.bb_fixed, "multi_rpm": a.multi_rpm}, a.real_dir,

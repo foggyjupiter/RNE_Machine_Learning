@@ -1,5 +1,11 @@
 """CountNet: CNN over a time-frequency image + scalar physics features.
 
+Two encoders (``arch``): ``cnn`` — the light first-study-style CNN described below
+(≈0.3-0.8 M parameters; trains on a CPU) — and ``resnet`` — full size: residual blocks
+with squeeze-and-excitation, frequency kept as 8 bands, an optional temporal
+transformer over the frame sequence and attentive statistics pooling (≈4-6 M
+parameters; meant for a GPU).
+
 Input: a time-frequency image (log-mel or wavelet scalogram, see features.py) and the
 scalar physics features. **No material property is ever an input** — diameter,
 density, restitution, friction and modulus are only targets.
@@ -125,18 +131,92 @@ def block(cin: int, cout: int, pool: tuple[int, int]) -> nn.Sequential:
                          nn.BatchNorm2d(cout), nn.ReLU(inplace=True), nn.MaxPool2d(pool))
 
 
+class SE(nn.Module):
+    """Squeeze-and-excitation channel attention."""
+
+    def __init__(self, c: int, r: int = 8):
+        super().__init__()
+        self.f = nn.Sequential(nn.AdaptiveAvgPool2d(1), nn.Conv2d(c, max(c // r, 4), 1),
+                               nn.ReLU(inplace=True), nn.Conv2d(max(c // r, 4), c, 1), nn.Sigmoid())
+
+    def forward(self, x):
+        return x * self.f(x)
+
+
+class ResBlock(nn.Module):
+    def __init__(self, cin: int, cout: int, stride=(1, 1)):
+        super().__init__()
+        self.body = nn.Sequential(
+            nn.Conv2d(cin, cout, 3, stride=stride, padding=1, bias=False), nn.BatchNorm2d(cout),
+            nn.ReLU(inplace=True), nn.Conv2d(cout, cout, 3, padding=1, bias=False), nn.BatchNorm2d(cout),
+            SE(cout))
+        self.skip = (nn.Identity() if cin == cout and stride == (1, 1) else
+                     nn.Sequential(nn.Conv2d(cin, cout, 1, stride=stride, bias=False), nn.BatchNorm2d(cout)))
+
+    def forward(self, x):
+        return torch.relu(self.body(x) + self.skip(x))
+
+
+class ResEncoder(nn.Module):
+    """Full-size encoder (``arch: resnet``): residual CNN with SE attention, frequency kept as
+    8 bands (not averaged away), optional temporal transformer over the frame sequence
+    (the shaking period ≈ 16 frames at 10 ms), attentive statistics pooling.
+    Output: pooled vector of size ``out_dim``."""
+
+    def __init__(self, in_channels: int, width: int = 32, temporal: str = "transformer",
+                 d_model: int = 256, f_keep: int = 8):
+        super().__init__()
+        w = width
+        self.stem = nn.Sequential(nn.Conv2d(in_channels, w, 3, padding=1, bias=False),
+                                  nn.BatchNorm2d(w), nn.ReLU(inplace=True))
+        chans = [w, 2 * w, 4 * w, 8 * w]
+        strides = [(2, 2), (2, 2), (2, 2), (2, 1)]
+        layers, cin = [], w
+        for c, st in zip(chans, strides):
+            layers += [ResBlock(cin, c, st), ResBlock(c, c)]
+            cin = c
+        self.stages = nn.Sequential(*layers)
+        self.fpool = nn.AdaptiveAvgPool2d((f_keep, None))
+        self.proj = nn.Linear(cin * f_keep, d_model)
+        self.temporal = (nn.TransformerEncoder(nn.TransformerEncoderLayer(
+            d_model, 4, 2 * d_model, dropout=0.1, batch_first=True), 2) if temporal == "transformer"
+            else None)
+        self.att = nn.Sequential(nn.Linear(d_model, 64), nn.Tanh(), nn.Linear(64, 1))
+        self.out_dim = 2 * d_model
+
+    def forward(self, x):                                   # x [B, C, F, T]
+        h = self.fpool(self.stages(self.stem(x)))           # [B, C', f_keep, T']
+        B, C, F, T = h.shape
+        h = self.proj(h.permute(0, 3, 1, 2).reshape(B, T, C * F))   # [B, T', d]
+        if self.temporal is not None:
+            h = self.temporal(h)
+        a = torch.softmax(self.att(h), dim=1)               # attention over time
+        mu = (a * h).sum(1)
+        sd = torch.sqrt(((a * (h - mu[:, None]) ** 2).sum(1)).clamp(min=1e-6))
+        return torch.cat([mu, sd], 1)
+
+
 class CountNet(nn.Module):
     def __init__(self, n_scalars: int, n_props: int, width: int = 32, dropout: float = 0.3,
                  use_scalars: bool = True, time_pool: int = 1, count_head: str = "regression",
-                 class_step: int = 5, in_channels: int = 1):
+                 class_step: int = 5, in_channels: int = 1, arch: str = "cnn",
+                 temporal: str = "transformer"):
         super().__init__()
         w = width
+        self.arch = arch
         self.time_pool = time_pool   # average-pool input frames (2 → 20 ms frames, ~3× faster)
-        self.conv = nn.Sequential(block(in_channels, w, (2, 2)), block(w, 2 * w, (2, 2)),
-                                  block(2 * w, 4 * w, (2, 2)), block(4 * w, 4 * w, (2, 1)))
+        if arch == "cnn":            # light: 4 plain conv blocks, frequency averaged
+            self.conv = nn.Sequential(block(in_channels, w, (2, 2)), block(w, 2 * w, (2, 2)),
+                                      block(2 * w, 4 * w, (2, 2)), block(4 * w, 4 * w, (2, 1)))
+            d_audio = 3 * 4 * w
+        elif arch == "resnet":       # full size
+            self.conv = ResEncoder(in_channels, w, temporal)
+            d_audio = self.conv.out_dim
+        else:
+            raise ValueError("arch must be cnn or resnet")
         self.use_scalars = use_scalars
         self.n_props = n_props
-        d = 3 * 4 * w + (n_scalars if use_scalars else 0)
+        d = d_audio + (n_scalars if use_scalars else 0)
         self.trunk = nn.Sequential(nn.Linear(d, 256), nn.ReLU(inplace=True), nn.Dropout(dropout),
                                    nn.Linear(256, 128), nn.ReLU(inplace=True))
         self.count = CountHead(128, count_head, class_step)
@@ -149,9 +229,12 @@ class CountNet(nn.Module):
         x = image.unsqueeze(1) if image.dim() == 3 else image     # [B, C, F, T]
         if self.time_pool > 1:
             x = nn.functional.avg_pool2d(x, (1, self.time_pool))
-        h = self.conv(x)                           # [B, C, F', T']
-        h = h.mean(dim=2)                          # over frequency
-        z = torch.cat([h.mean(-1), h.std(-1), h.amax(-1)], dim=1)
+        if self.arch == "resnet":
+            z = self.conv(x)
+        else:
+            h = self.conv(x)                       # [B, C, F', T']
+            h = h.mean(dim=2)                      # over frequency
+            z = torch.cat([h.mean(-1), h.std(-1), h.amax(-1)], dim=1)
         if self.use_scalars:
             z = torch.cat([z, scalars], dim=1)
         return self.trunk(z)

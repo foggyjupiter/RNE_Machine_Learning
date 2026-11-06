@@ -38,6 +38,9 @@ rneml predict 새녹음.wav --run outputs/blind_mel [--run outputs/blind_scalogr
 ```
 새 녹음은 학습 데이터와 같은 조건이어야 합니다: 5×5×7 cm 상자, 372 rpm, 휴대폰 마이크 약 2.7 m.
 
+**모델 크기** (`arch`): `cnn` (경량, 약 0.3~0.8 M 파라미터, CPU로 학습 가능) / `resnet` (큰 모델, 약 4.7 M: 잔차 블록 + SE 채널 주의, 주파수 8구간 보존, 시간축 트랜스포머로 가진 주기 같은 긴 리듬 구조, 주의 기반 통계 풀링; GPU용, CUDA에서는 혼합 정밀도 자동).
+실험 묶음은 `rneml suite --size cpu` (경량) 또는 `--size full` (큰 모델)로 같은 실험을 돌립니다. 큰 모델 핵심 비교(Z군)는 우선순위 6으로 따로 있습니다.
+
 GPU가 없으면 `--width 16 --time-pool 2`를 붙이세요. 너비를 절반으로 줄이고 프레임을 20 ms로 묶어 약 9배 빨라집니다 (CPU 1스레드 기준 샘플당 0.31초 → 0.035초).
 
 `--real-dir`에는 1차 연구의 5초 클립 폴더(`{개수}-{번호}.wav`)를 줍니다. 비공개 저장소라면 `huggingface-cli login`을 먼저 하세요.

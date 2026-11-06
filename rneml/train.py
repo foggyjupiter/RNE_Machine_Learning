@@ -90,6 +90,9 @@ class TrainConfig:
     batch: int = 32
     lr: float = 1e-3
     weight_decay: float = 1e-4
+    arch: str = "cnn"                    # cnn (light) | resnet (full size; GPU)
+    temporal: str = "transformer"        # resnet only: transformer | none
+    amp: bool = True                     # mixed precision on CUDA
     width: int = 32
     time_pool: int = 1                   # 2 = 20 ms frames (CPU-friendly, ~3× faster)
     dropout: float = 0.3
@@ -484,7 +487,9 @@ def train(cfg: TrainConfig, log=print) -> dict:
 
     in_ch = img.shape[1] if img.ndim == 4 else 1
     model = CountNet(sc.shape[1], props.shape[1], cfg.width, cfg.dropout, cfg.use_scalars,
-                     cfg.time_pool, cfg.count_head, cfg.class_step, in_ch).to(dev)
+                     cfg.time_pool, cfg.count_head, cfg.class_step, in_ch, cfg.arch, cfg.temporal).to(dev)
+    use_amp = cfg.amp and dev.type == "cuda"
+    scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
     opt = torch.optim.AdamW(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
     nb = math.ceil(len(train_idx) / cfg.batch)
     total = max(cfg.epochs * nb, 1)
@@ -510,7 +515,9 @@ def train(cfg: TrainConfig, log=print) -> dict:
             full = np.concatenate([sup, ru]).astype(int)
             m, s = norm(img[full], sc[full])
             m, s = _augment(torch.from_numpy(m), torch.from_numpy(s), cfg, norm, g)
-            o = model(m.to(dev), s.to(dev))
+            with torch.autocast(device_type=dev.type, dtype=torch.float16, enabled=use_amp):
+                o = model(m.to(dev), s.to(dev))
+            o = o._replace(**{k: (v.float() if torch.is_tensor(v) else v) for k, v in o._asdict().items()})
             S = len(sup)
             yt = torch.from_numpy(y[sup]).to(dev)
             n_hat, n_lv = o.n[:S], o.n_logvar[:S]
@@ -542,13 +549,14 @@ def train(cfg: TrainConfig, log=print) -> dict:
                 prog = step / total
                 lam = cfg.dann_weight * (2.0 / (1.0 + math.exp(-10 * prog)) - 1.0)
                 dom = torch.from_numpy(is_real[full].astype(np.float32)).to(dev)
-                logit = model.domain(grad_reverse(o.emb, 1.0)).squeeze(1)
+                logit = model.domain(grad_reverse(o.emb, 1.0)).squeeze(1).float()
                 ld = bce(logit, dom)
                 loss = loss + lam * ld
                 dl += float(ld) * len(idx)
             opt.zero_grad()
-            loss.backward()
-            opt.step()
+            scaler.scale(loss).backward()
+            scaler.step(opt)
+            scaler.update()
             sched.step()
             step += 1
             tl += float(loss) * len(idx)
