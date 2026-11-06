@@ -60,7 +60,7 @@ def _model(kind: str, hp):
 def run_baseline(cfg, kind: str, log=print) -> dict:
     from rneml import splits as SP
     from rneml.evaluate import _by_material, degeneracy, property_metrics
-    from rneml.train import cache_path, conformal_metrics, features_for, metrics, real_split
+    from rneml.train import conformal_metrics, feats, metrics, real_split
 
     if kind not in BASELINES:
         raise ValueError(f"baseline must be one of {BASELINES}")
@@ -74,7 +74,7 @@ def run_baseline(cfg, kind: str, log=print) -> dict:
         tr = D.bb_like(tr)
 
     def X(rs, what):
-        _, sc = features_for(rs, cache_path(cfg, what), cfg.workers, log, cfg.feature)
+        _, sc = feats(cfg, rs, what, log)
         return _design(kind, sc.astype(np.float64))
 
     what = Path(cfg.data_dir).name

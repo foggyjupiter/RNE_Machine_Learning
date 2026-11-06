@@ -42,20 +42,22 @@ GAMMA_REF = 2.07
 
 
 def normalize_levels(img: np.ndarray, sc: np.ndarray, mask: np.ndarray, mode: str):
-    """img [B,K,F,T] (dB), sc [B,K,S], mask [B,K] bool → normalised copies (float32)."""
+    """img [B,K,(C,)F,T] (dB), sc [B,K,S], mask [B,K] bool → normalised copies (float32)."""
     img = img.astype(np.float32)
     sc = sc.astype(np.float32).copy()
     if mode == "absolute":
         return img, sc
-    clip_mean = img.mean(axis=(2, 3))                                   # [B,K]
+    ax = tuple(range(2, img.ndim))
+    expand = (slice(None), slice(None)) + (None,) * len(ax)
+    clip_mean = img.mean(axis=ax)                                       # [B,K]
     if mode == "per_clip":
-        img = img - clip_mean[:, :, None, None]
+        img = img - clip_mean[expand]
         sc[:, :, LEVEL_SCALARS] = 0.0
         return img, sc
     if mode == "per_set":
         m = mask.astype(np.float32)
         off = (clip_mean * m).sum(1) / np.maximum(m.sum(1), 1)          # [B]
-        img = img - off[:, None, None, None]
+        img = img - off.reshape(-1, *([1] * (img.ndim - 1)))
         lv = sc[:, :, LEVEL_SCALARS]
         lv_off = (lv * m[:, :, None]).sum(1) / np.maximum(m.sum(1), 1)[:, None]
         sc[:, :, LEVEL_SCALARS] = lv - lv_off[:, None, :]
@@ -81,9 +83,10 @@ class SetCountNet(nn.Module):
     def __init__(self, n_scalars: int, n_props: int, width: int = 32, dropout: float = 0.3,
                  use_scalars: bool = True, time_pool: int = 1, agg: str = "set",
                  diff_path: str = "both", use_condition: bool = True,
-                 count_head: str = "regression", class_step: int = 5):
+                 count_head: str = "regression", class_step: int = 5, in_channels: int = 1):
         super().__init__()
-        self.enc = CountNet(n_scalars, 0, width, dropout, use_scalars, time_pool)
+        self.enc = CountNet(n_scalars, 0, width, dropout, use_scalars, time_pool,
+                            in_channels=in_channels)
         d = 128
         self.agg, self.diff_path, self.use_condition = agg, diff_path, use_condition
         self.n_props = n_props
@@ -154,8 +157,7 @@ def batch_arrays(sets, img, sc, gamma, K: int, drop_p: float = 0.0, rng=None):
     """Pad sets to K → (img [B,K,F,T] f16, sc [B,K,S], gamma [B,K], mask [B,K]).
     ``drop_p`` randomly removes conditions (at least one kept)."""
     B = len(sets)
-    F, T = img.shape[1:]
-    I = np.zeros((B, K, F, T), np.float16)
+    I = np.zeros((B, K, *img.shape[1:]), np.float16)
     S = np.zeros((B, K, sc.shape[1]), np.float32)
     G = np.full((B, K), GAMMA_REF, np.float32)
     M = np.zeros((B, K), bool)

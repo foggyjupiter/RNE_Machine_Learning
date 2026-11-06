@@ -75,7 +75,10 @@ class TrainConfig:
     max_conditions: int = 5
     eval_condition_subsets: dict = field(default_factory=lambda: {
         "372rpm_only": [1], "three": [0, 2, 4], "all": None})
-    feature: str = "mel"                 # "mel" or "scalogram"
+    feature: str = "mel"                 # mel | scalogram | mel22k | '+'-joined mel/perc/harm channels
+    denoise: bool = False                # spectral subtraction of the motor noise (empty-box clips)
+    noise_ref: str | None = None         # folder with empty-box clips 0-*.wav (default: real_dir)
+    band_hz: list | None = None          # keep mel bands within [lo, hi] Hz
     use_modulation: bool = True          # modulation-spectrum features in the scalar branch
     scalar_set: str = "all"              # all | basic (12 physics) | first_study (5: dB mean/std/max, flux, active)
     count_head: str = "regression"       # regression | classification | soft_label | coral
@@ -121,7 +124,7 @@ def load_config(path: str | Path | None, **over) -> TrainConfig:
 # ----------------------------------------------------------------------------- features
 
 def features_for(rows: list[dict], cache: Path, workers: int, log=print, kind: str = "mel",
-                 gain: float = 1.0):
+                 gain: float = 1.0, noise_psd_file: str | None = None, band: tuple | None = None):
     """(image [n,F,T] float16, scalars [n,k]) aligned with rows; computes missing ones."""
     cache = Path(cache)
     paths = [r["path"] for r in rows]
@@ -132,7 +135,8 @@ def features_for(rows: list[dict], cache: Path, workers: int, log=print, kind: s
     missing = [p for p in dict.fromkeys(paths) if p not in have]
     if missing:
         log(f"computing {kind} features for {len(missing)} clips → {cache}")
-        tmp = build_cache(missing, cache.with_suffix(".new.npz"), workers, log, kind, gain)
+        tmp = build_cache(missing, cache.with_suffix(".new.npz"), workers, log, kind, gain,
+                          noise_psd_file, band)
         n = np.load(tmp)
         if have:
             o = np.load(cache)
@@ -151,14 +155,44 @@ def features_for(rows: list[dict], cache: Path, workers: int, log=print, kind: s
 
 def cache_path(cfg: TrainConfig, what: str, gain: float = 1.0) -> Path:
     g = "" if gain == 1.0 else f"_gain{gain:g}"
-    return Path(cfg.cache_dir) / f"{what}_{cfg.feature}_v{FEATURE_VERSION}{g}.npz"
+    dn = "_dn" if getattr(cfg, "denoise", False) else ""
+    band = getattr(cfg, "band_hz", None)
+    b = f"_b{int(band[0])}-{int(band[1])}" if band else ""
+    return Path(cfg.cache_dir) / f"{what}_{cfg.feature}{dn}{b}_v{FEATURE_VERSION}{g}.npz"
+
+
+def noise_psd_path(cfg: TrainConfig, log=print) -> str | None:
+    """Mean noise power spectrum of the empty-box clips (cached), for spectral subtraction."""
+    if not getattr(cfg, "denoise", False):
+        return None
+    import glob
+
+    from rneml.features import noise_psd_from
+    ref = cfg.noise_ref or cfg.real_dir
+    if not ref:
+        raise ValueError("denoise needs noise_ref (or real_dir) with empty-box clips 0-*.wav")
+    out = Path(cfg.cache_dir) / "noise_psd.npy"
+    if not out.exists():
+        files = sorted(glob.glob(str(Path(ref) / "0-*.wav")))
+        if not files:
+            raise FileNotFoundError(f"no empty-box clips 0-*.wav in {ref}")
+        out.parent.mkdir(parents=True, exist_ok=True)
+        np.save(out, noise_psd_from(files))
+        log(f"noise spectrum from {len(files)} empty-box clips → {out}")
+    return str(out)
+
+
+def feats(cfg: TrainConfig, rows: list[dict], what: str, log=print, gain: float = 1.0):
+    """Cached features of rows for this config (feature kind, denoising, band, gain)."""
+    return features_for(rows, cache_path(cfg, what, gain), cfg.workers, log, cfg.feature, gain,
+                        noise_psd_path(cfg, log), tuple(cfg.band_hz) if cfg.band_hz else None)
 
 
 def level_free(img: np.ndarray, sc: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Drop the absolute level: per-clip mean dB removed from the image, level scalars zeroed.
     For deployment with an unknown microphone gain / distance."""
     img = img.astype(np.float32)
-    img = img - img.mean(axis=(1, 2), keepdims=True)
+    img = img - img.mean(axis=tuple(range(1, img.ndim)), keepdims=True)
     sc = sc.copy()
     sc[:, LEVEL_SCALARS] = 0.0
     return img.astype(np.float16), sc
@@ -214,15 +248,16 @@ def _device(name: str) -> torch.device:
 
 
 def _augment(img: torch.Tensor, sc: torch.Tensor, cfg: TrainConfig, norm: Norm, g):
-    B, F, T = img.shape
+    B = img.shape[0]
+    F, T = img.shape[-2:]
     if cfg.crop_frac < 1.0:
         L = max(8, int(round(cfg.crop_frac * T)))
         st = torch.randint(0, T - L + 1, (B,), generator=g)
-        img = torch.stack([img[b, :, st[b]:st[b] + L] for b in range(B)])
+        img = torch.stack([img[b, ..., st[b]:st[b] + L] for b in range(B)])
         T = L
     if cfg.gain_db > 0 and not cfg.level_free:
         d = (torch.rand(B, generator=g) * 2 - 1) * cfg.gain_db
-        img = img + (d / norm.m_sd)[:, None, None].to(img)
+        img = img + (d / norm.m_sd).view(-1, *([1] * (img.dim() - 1))).to(img)
         s_sd = torch.as_tensor(norm.s_sd[LEVEL_SCALARS], dtype=sc.dtype)
         sc = sc.clone()
         sc[:, LEVEL_SCALARS] += d[:, None].to(sc) / s_sd.to(sc)
@@ -231,12 +266,12 @@ def _augment(img: torch.Tensor, sc: torch.Tensor, cfg: TrainConfig, norm: Norm, 
         w = torch.randint(0, T // 10 + 1, (B,), generator=g)
         s = torch.randint(0, T, (B,), generator=g)
         for b in range(B):
-            img[b, :, s[b]:s[b] + w[b]] = 0.0
+            img[b, ..., s[b]:s[b] + w[b]] = 0.0
     for _ in range(cfg.spec_freq_masks):
         w = torch.randint(0, F // 10 + 1, (B,), generator=g)
         s = torch.randint(0, F, (B,), generator=g)
         for b in range(B):
-            img[b, s[b]:s[b] + w[b], :] = 0.0
+            img[b, ..., s[b]:s[b] + w[b], :] = 0.0
     return img, sc
 
 
@@ -259,13 +294,13 @@ def predict(model, img, sc, norm: Norm, device, batch: int = 64, crop_frac: floa
             tta_crops: int = 0, sigma_scale: dict | None = None) -> dict:
     """N mean/std (particles) and normalised property means/stds (averaged over views)."""
     model.eval()
-    views = _views(img.shape[2], crop_frac, tta_crops)
+    views = _views(img.shape[-1], crop_frac, tta_crops)
     acc = {"n": 0.0, "n_var": 0.0, "props": 0.0, "props_var": 0.0}
     with torch.no_grad():
         for v in views:
             n, nv, p, pv = [], [], [], []
             for i in range(0, len(img), batch):
-                m, s = norm(img[i:i + batch, :, v], sc[i:i + batch])
+                m, s = norm(img[i:i + batch, ..., v], sc[i:i + batch])
                 o = model(torch.from_numpy(m).to(device), torch.from_numpy(s).to(device))
                 n.append(o.n.cpu().numpy())
                 nv.append(np.exp(o.n_logvar.cpu().numpy()))
@@ -394,8 +429,7 @@ def train(cfg: TrainConfig, log=print) -> dict:
         f"({cfg.train_subset}, {cfg.feature}{', modulation' if cfg.use_modulation else ''})")
 
     sim_rows = tr + va + pairs
-    img, sc = features_for(sim_rows, cache_path(cfg, Path(cfg.data_dir).name), cfg.workers, log,
-                           cfg.feature)
+    img, sc = feats(cfg, sim_rows, Path(cfg.data_dir).name, log)
     img, sc = prepare(img, sc, cfg)
     y = np.array([r["N"] for r in sim_rows], np.float32) / 100.0
     props = np.stack([D.aux_targets(r) for r in sim_rows])
@@ -407,7 +441,7 @@ def train(cfg: TrainConfig, log=print) -> dict:
 
     def append_real(rr):
         nonlocal img, sc, y, props, mask, is_real
-        ri, rs = features_for(rr, cache_path(cfg, "real"), cfg.workers, log, cfg.feature)
+        ri, rs = feats(cfg, rr, "real", log)
         ri, rs = prepare(ri, rs, cfg)
         k0 = len(y)
         img, sc = np.concatenate([img, ri]), np.concatenate([sc, rs])
@@ -437,8 +471,9 @@ def train(cfg: TrainConfig, log=print) -> dict:
     pool = [(a, b, 0) for a, b in same_n] + [(a, b, 1) for a, b in same_m]
     log(f"contrast pairs: same_N {len(same_n)}, same_material {len(same_m)}")
 
+    in_ch = img.shape[1] if img.ndim == 4 else 1
     model = CountNet(sc.shape[1], props.shape[1], cfg.width, cfg.dropout, cfg.use_scalars,
-                     cfg.time_pool, cfg.count_head, cfg.class_step).to(dev)
+                     cfg.time_pool, cfg.count_head, cfg.class_step, in_ch).to(dev)
     opt = torch.optim.AdamW(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
     nb = math.ceil(len(train_idx) / cfg.batch)
     total = max(cfg.epochs * nb, 1)
@@ -519,6 +554,7 @@ def train(cfg: TrainConfig, log=print) -> dict:
             best, best_ep = score, ep
             torch.save({"model": model.state_dict(), "norm": norm.state(), "n_scalars": sc.shape[1],
                         "n_props": props.shape[1], "prop_names": D.AUX_NAMES, "cfg": asdict(cfg),
+                        "in_channels": in_ch,
                         "feature_version": FEATURE_VERSION}, out / "model.pt")
         elif ep - best_ep >= cfg.patience:
             log(f"early stop (best epoch {best_ep})")

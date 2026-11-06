@@ -19,7 +19,7 @@ BB_LIKE = {"particle_diameter_m": (5.0e-3, 7.0e-3), "particle_density": (0.0, 20
 
 
 def gap(cfg, n_tol: int = 8, material: dict | None = None, top: int = 5, log=print) -> dict:
-    from rneml.train import cache_path, features_for, real_split
+    from rneml.train import feats, real_split
 
     rows = D.read_metadata(cfg.data_dir)
     if material:
@@ -28,8 +28,8 @@ def gap(cfg, n_tol: int = 8, material: dict | None = None, top: int = 5, log=pri
     _, _, real = real_split(cfg)
     if not real:
         real = D.real_recordings(cfg.real_dir)
-    _, S = features_for(rows, cache_path(cfg, Path(cfg.data_dir).name), cfg.workers, log, cfg.feature)
-    _, R = features_for(real, cache_path(cfg, "real"), cfg.workers, log, cfg.feature)
+    _, S = feats(cfg, rows, Path(cfg.data_dir).name, log)
+    _, R = feats(cfg, real, "real", log)
     S, R = S[:, :len(BASIC_SCALARS)], R[:, :len(BASIC_SCALARS)]
     sN = np.array([r["N"] for r in rows])
     rN = np.array([r["N"] for r in real])

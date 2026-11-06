@@ -47,22 +47,28 @@ def load_model(run: str | Path, device="cpu"):
     ck = torch.load(Path(run) / "model.pt", map_location=device, weights_only=False)
     c = ck["cfg"]
     m = CountNet(ck["n_scalars"], ck["n_props"], c["width"], c["dropout"], c["use_scalars"],
-                 c.get("time_pool", 1), c.get("count_head", "regression"), c.get("class_step", 5))
-    m.load_state_dict(ck["model"])
+                 c.get("time_pool", 1), c.get("count_head", "regression"), c.get("class_step", 5),
+                 ck.get("in_channels", 1))
+    sd = dict(ck["model"])
+    for k in ("weight", "bias"):          # checkpoints from before the CountHead refactor
+        if f"count.{k}" in sd:
+            sd[f"count.lin.{k}"] = sd.pop(f"count.{k}")
+    m.load_state_dict(sd)
     return m.to(device).eval(), Norm.from_state(ck["norm"]), c, ck.get("sigma_scale")
 
 
 def predict_runs(runs: list[Path], rows: list[dict], what: str, device, log=print,
                  gain: float = 1.0) -> dict:
     """Ensemble prediction of all runs for rows ('what' names the feature cache)."""
-    from rneml.train import TrainConfig, cache_path, features_for, predict, prepare
+    from rneml.train import TrainConfig, feats, predict, prepare
 
     outs = []
     for run in runs:
         model, norm, c, ss = load_model(run, device)
         cfg = TrainConfig(**c)
-        img, sc = features_for(rows, cache_path(cfg, what, gain), cfg.workers, log, cfg.feature, gain)
+        img, sc = feats(cfg, rows, what, log, gain)
         img, sc = prepare(img, sc, cfg)
+        sc = sc[:, :len(norm.s_mu)]          # models trained before features were appended
         outs.append(predict(model, img, sc, norm, device, crop_frac=cfg.crop_frac,
                             tta_crops=cfg.tta_crops, sigma_scale=ss))
     if len(outs) == 1:
@@ -145,9 +151,13 @@ def evaluate_runs(runs: list[str | Path], cfg, out: str | Path, log=print) -> di
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
     dev = _device(cfg.device)
-    has_props = load_model(runs[0], dev)[0].props is not None
+    m0, _, _, ss0 = load_model(runs[0], dev)
+    has_props = m0.props is not None
+    conf = (ss0 or {}).get("conformal")
     eval_dir = cfg.eval_data_dir or cfg.data_dir
-    rows = D.read_metadata(eval_dir)
+    split_spec = cfg.split if not cfg.eval_data_dir else None
+    rows = SP.assign(D.read_metadata(eval_dir), split_spec, cfg.split_seed)
+    SP.check_no_leak(rows)
     what = Path(eval_dir).name
     res: dict = {"runs": [str(r) for r in runs], "feature": cfg.feature, "eval_data": str(eval_dir),
                  "train_subset": cfg.train_subset, "real_train_per_N": cfg.real_train_per_N,

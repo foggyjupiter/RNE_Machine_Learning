@@ -1,6 +1,21 @@
 """Audio → model inputs.
 
-Two time-frequency images are available (``feature`` in the training config):
+Preprocessing that focuses the model on particular components (training config):
+
+* ``denoise: true`` — spectral subtraction of the stationary motor/shaker noise, as in the
+  first study: the mean power spectrum of empty-box recordings (``noise_ref``, default the
+  N = 0 clips of ``real_dir``) is subtracted with a floor, P' = max(P − N̄, 0.05 P). Applied
+  identically to simulated and real clips.
+* multi-channel images, ``feature: "mel+perc+harm"`` — harmonic/percussive separation
+  (median filtering of the power spectrogram along time vs frequency, soft masks):
+  ``perc`` holds the impact clicks (vertical lines: when and how often particles hit),
+  ``harm`` the sustained ring of the box modes and room and the motor hum (horizontal
+  lines: the material/box timbre and the background). Separating them lets the model
+  weigh "how many impacts" and "what rings" independently — and the click-to-ring
+  balance is where simulation and recordings differ most.
+* ``band_hz: [lo, hi]`` — keep only mel bands with centres in this range.
+
+Images (``feature`` in the training config):
 
 * ``mel``: log-mel spectrogram at the native 48 kHz, mel bands up to 24 kHz.
 * ``mel22k``: the first-study pipeline's view — resampled to 22.05 kHz, mel up to 11 kHz
@@ -51,8 +66,14 @@ BASIC_SCALARS = ["db_mean", "db_std", "db_max", "flux", "active_ratio", "kurtosi
 MOD_GROUPS = 16                                  # mel bands grouped 8 by 8
 MOD_EDGES = np.geomspace(0.8, 50.0, 13)          # 12 modulation bins [Hz] (frame rate 100 Hz)
 MOD_NAMES = [f"mod_g{g:02d}_b{b:02d}" for g in range(MOD_GROUPS) for b in range(len(MOD_EDGES) - 1)]
-SCALAR_NAMES = BASIC_SCALARS + MOD_NAMES
-FEATURE_VERSION = 2                              # bump when the cached features change
+# Spectral kurtosis per band group: the first study's waveform kurtosis ψ3 resolved in
+# frequency (which bands are impulsive), from the band power envelopes.
+SK_GROUPS = 16
+SK_NAMES = [f"sk_g{g:02d}" for g in range(SK_GROUPS)]
+SCALAR_NAMES = BASIC_SCALARS + MOD_NAMES + SK_NAMES
+FEATURE_VERSION = 3                              # bump when the cached features change
+MULTI_CHANNELS = ("mel", "perc", "harm")
+HPSS_KERNEL = 17                                 # 170 ms along time / ≈ 400 Hz along frequency
 
 
 def read_audio(path: str | Path, sr: int = SR, duration: float = CLIP_S) -> np.ndarray:
@@ -103,11 +124,54 @@ def power_spectrogram(x: np.ndarray, sr: int = SR) -> np.ndarray:
     return (np.abs(Z) ** 2).astype(np.float32)
 
 
-def log_mel(x: np.ndarray, sr: int = SR) -> np.ndarray:
-    """[N_MELS, frames] in dB re 1 (fixed reference), floored at DB_FLOOR."""
-    P = power_spectrogram(x, sr)
+def mel_db(P: np.ndarray, sr: int = SR) -> np.ndarray:
+    """Power spectrogram → [N_MELS, frames] dB re 1 (fixed reference), floored."""
     M = mel_filterbank(sr) @ P
     return np.maximum(10 * np.log10(M + 1e-12), DB_FLOOR).astype(np.float32)
+
+
+def log_mel(x: np.ndarray, sr: int = SR) -> np.ndarray:
+    """[N_MELS, frames] in dB re 1 (fixed reference), floored at DB_FLOOR."""
+    return mel_db(power_spectrogram(x, sr), sr)
+
+
+def denoise_power(P: np.ndarray, noise_psd: np.ndarray, over: float = 1.0,
+                  floor: float = 0.05) -> np.ndarray:
+    """Spectral subtraction of a stationary noise power spectrum (per STFT bin)."""
+    return np.maximum(P - over * noise_psd[:, None], floor * P).astype(np.float32)
+
+
+def noise_psd_from(files: list[str]) -> np.ndarray:
+    """Mean STFT power spectrum of noise-only recordings (empty box)."""
+    acc = None
+    for f in files:
+        P = power_spectrogram(read_audio(f))
+        m = P.mean(1)
+        acc = m if acc is None else acc + m
+    return (acc / max(len(files), 1)).astype(np.float32)
+
+
+def hpss(P: np.ndarray, k: int = HPSS_KERNEL) -> tuple[np.ndarray, np.ndarray]:
+    """(harmonic, percussive) power by median filtering along time / frequency, soft masks."""
+    from scipy.ndimage import median_filter
+    H = median_filter(P, size=(1, k))
+    Q = median_filter(P, size=(k, 1))
+    Mp = Q ** 2 / (Q ** 2 + H ** 2 + 1e-30)
+    return ((1 - Mp) * P).astype(np.float32), (Mp * P).astype(np.float32)
+
+
+def spectral_kurtosis(S_db: np.ndarray) -> np.ndarray:
+    """Excess kurtosis over time of the band-group power envelopes [SK_GROUPS]."""
+    P = 10 ** (S_db / 10)
+    g = P[: (P.shape[0] // SK_GROUPS) * SK_GROUPS].reshape(SK_GROUPS, -1, P.shape[1]).sum(1)
+    k = stats.kurtosis(g, axis=1)
+    return np.sign(k) * np.log1p(np.abs(k))          # compress heavy tails
+
+
+def band_rows(lo: float, hi: float) -> np.ndarray:
+    """Indices of mel rows whose centre frequency lies in [lo, hi] Hz."""
+    pts = _mel_to_hz(np.linspace(_hz_to_mel(F_MIN), _hz_to_mel(F_MAX), N_MELS + 2))[1:-1]
+    return np.flatnonzero((pts >= lo) & (pts <= hi))
 
 
 def log_mel_22k(x: np.ndarray, sr: int = SR) -> np.ndarray:
@@ -206,33 +270,57 @@ def modulation_features(S_db: np.ndarray, frame_rate: float = SR / HOP) -> np.nd
     return np.log10(out + 1e-6).ravel()
 
 
-def extract(path: str | Path, kind: str = "mel", gain: float = 1.0) -> tuple[np.ndarray, np.ndarray]:
-    """(time-frequency image in dB, scalar features). Scalars always use the log-mel.
+def extract(path: str | Path, kind: str = "mel", gain: float = 1.0,
+            noise_psd_file: str | None = None, band: tuple | None = None) -> tuple[np.ndarray, np.ndarray]:
+    """(time-frequency image(s) in dB, scalar features).
 
-    ``gain`` ≠ 1 simulates another microphone gain on the recorded file (with the device
-    clipping at ±1), for the gain-perturbation evaluation.
+    ``kind``: 'mel' | 'mel22k' | 'scalogram' | '+'-joined channels of 'mel', 'perc', 'harm'
+    (→ image [C, F, T]). ``gain`` ≠ 1 simulates another microphone gain on the file (with
+    device clipping at ±1). ``noise_psd_file``: spectral subtraction before everything
+    mel-based. ``band``: keep mel rows in [lo, hi] Hz. Scalars use the (denoised) log-mel
+    and the raw waveform.
     """
     x = read_audio(path)
     if gain != 1.0:
         x = np.clip(gain * x, -1.0, 1.0).astype(np.float32)
-    S = log_mel(x)
-    img = {"mel": lambda: S, "scalogram": lambda: scalogram(x), "mel22k": lambda: log_mel_22k(x)}[kind]()
-    return img, np.concatenate([scalar_features(x, S), modulation_features(S)])
+    P = power_spectrogram(x)
+    if noise_psd_file:
+        P = denoise_power(P, np.load(noise_psd_file))
+    S = mel_db(P)
+    if "+" in kind or kind in ("perc", "harm"):
+        chans = kind.split("+")
+        bad = [c for c in chans if c not in MULTI_CHANNELS]
+        if bad:
+            raise ValueError(f"unknown channels {bad}; use {MULTI_CHANNELS}")
+        Ph, Pp = hpss(P) if ("perc" in chans or "harm" in chans) else (None, None)
+        img = np.stack([{"mel": S, "perc": mel_db(Pp) if Pp is not None else None,
+                         "harm": mel_db(Ph) if Ph is not None else None}[c] for c in chans])
+        if len(chans) == 1:
+            img = img[0]
+    else:
+        img = {"mel": lambda: S, "scalogram": lambda: scalogram(x), "mel22k": lambda: log_mel_22k(x)}[kind]()
+    if band is not None and kind not in ("scalogram", "mel22k"):
+        rows = band_rows(*band)
+        img = img[..., rows, :]
+    sc = np.concatenate([scalar_features(x, S), modulation_features(S), spectral_kurtosis(S)])
+    return img, sc.astype(np.float32)
 
 
 def build_cache(paths: list[str], out: str | Path, workers: int = 4, log=print,
-                kind: str = "mel", gain: float = 1.0) -> Path:
+                kind: str = "mel", gain: float = 1.0, noise_psd_file: str | None = None,
+                band: tuple | None = None) -> Path:
     """Compute features for all paths into one .npz (image as float16)."""
     from concurrent.futures import ProcessPoolExecutor
 
-    if kind not in ("mel", "scalogram", "mel22k"):
-        raise ValueError("feature must be 'mel', 'scalogram' or 'mel22k'")
+    if not (kind in ("mel", "scalogram", "mel22k") or all(c in MULTI_CHANNELS for c in kind.split("+"))):
+        raise ValueError("feature must be mel, scalogram, mel22k or '+'-joined mel/perc/harm")
     out = Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)
     mels, scal = [None] * len(paths), [None] * len(paths)
     with ProcessPoolExecutor(max_workers=workers) as ex:
-        for k, (S, s) in enumerate(ex.map(extract, paths, [kind] * len(paths), [gain] * len(paths),
-                                          chunksize=8)):
+        n = len(paths)
+        for k, (S, s) in enumerate(ex.map(extract, paths, [kind] * n, [gain] * n,
+                                          [noise_psd_file] * n, [band] * n, chunksize=8)):
             mels[k], scal[k] = S.astype(np.float16), s
             if (k + 1) % 500 == 0:
                 log(f"features {k + 1}/{len(paths)}")

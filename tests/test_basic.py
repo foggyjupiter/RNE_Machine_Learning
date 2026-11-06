@@ -25,7 +25,9 @@ def test_features_shapes_and_level():
     assert S.shape[0] == N_MELS and abs(S.shape[1] - SR * 5 // HOP) <= 2
     s = scalar_features(x, S)
     assert s.shape == (len(BASIC_SCALARS),) and np.isfinite(s).all()
-    assert len(SCALAR_NAMES) == len(BASIC_SCALARS) + modulation_features(S).size
+    from rneml.features import SK_NAMES, spectral_kurtosis
+    assert len(SCALAR_NAMES) == len(BASIC_SCALARS) + modulation_features(S).size + len(SK_NAMES)
+    assert spectral_kurtosis(S).shape == (len(SK_NAMES),)
     # fixed dB reference: 2x amplitude → +6 dB
     assert np.mean(log_mel(2 * x) - S) == np.float32(np.mean(log_mel(2 * x) - S))
     assert abs(np.mean(log_mel(2 * x) - S) - 6.02) < 0.05
@@ -315,3 +317,36 @@ def test_count_heads_shapes_losses_and_monotone_coral():
     hi, _, _ = h(torch.full((1, 128), 10.0))
     lo, _, _ = h(torch.full((1, 128), -10.0))
     assert hi.item() > 0.95 and lo.item() < 0.05
+
+
+def test_hpss_and_denoise():
+    from rneml.features import denoise_power, hpss, power_spectrogram
+    t = np.arange(SR * 2) / SR
+    tone = 0.05 * np.sin(2 * np.pi * 9400 * t)                   # sustained ring
+    clicks = np.zeros_like(t)
+    clicks[(np.arange(0.05, 2, 0.16) * SR).astype(int)] = 1.0     # impacts
+    P = power_spectrogram((tone + clicks).astype(np.float32))
+    H, Pp = hpss(P)
+    k = int(9400 / (SR / 2048))
+    assert H[k].mean() > 5 * Pp[k].mean()                          # tone → harmonic
+    cols = (np.arange(0.05, 2, 0.16) * SR / 480).astype(int)
+    hi = slice(int(15000 / (SR / 2048)), None)
+    assert Pp[hi][:, cols].mean() > 5 * H[hi][:, cols].mean()      # clicks → percussive
+    noise = np.full(P.shape[0], P.mean(), np.float32)
+    D = denoise_power(P, noise)
+    assert np.all(D <= P + 1e-9) and np.all(D >= 0.05 * P - 1e-9)
+
+
+def test_multichannel_model_and_set_model():
+    from rneml.setmodel import SetCountNet, normalize_levels
+    m = CountNet(len(SCALAR_NAMES), len(D.AUX_NAMES), width=8, in_channels=3)
+    o = m(torch.randn(2, 3, N_MELS, 50), torch.randn(2, len(SCALAR_NAMES)))
+    assert o.n.shape == (2,)
+    sm = SetCountNet(len(SCALAR_NAMES), len(D.AUX_NAMES), width=8, in_channels=3)
+    o = sm(torch.randn(2, 4, 3, N_MELS, 50), torch.randn(2, 4, len(SCALAR_NAMES)),
+           torch.full((2, 4), 2.07), torch.ones(2, 4, dtype=torch.bool))
+    assert o.n.shape == (2,)
+    img = np.random.default_rng(0).normal(-40, 5, (1, 2, 3, 8, 10)).astype(np.float32)
+    a, _ = normalize_levels(img, np.zeros((1, 2, len(SCALAR_NAMES)), np.float32), np.ones((1, 2), bool), "per_set")
+    b, _ = normalize_levels(img + 7, np.zeros((1, 2, len(SCALAR_NAMES)), np.float32), np.ones((1, 2), bool), "per_set")
+    assert np.allclose(a, b, atol=1e-4)

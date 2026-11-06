@@ -70,7 +70,7 @@ def _ridge_cv(X, y, groups, alphas=(0.1, 1, 10, 100), k=5, seed=0):
 
 def interpret(run: str | Path, data_dir: str | None = None, split: str = "test", log=print) -> dict:
     from rneml import splits as SP
-    from rneml.train import cache_path, features_for, prepare
+    from rneml.train import feats, prepare
 
     run = Path(run)
     dev = "cpu"
@@ -81,8 +81,9 @@ def interpret(run: str | Path, data_dir: str | None = None, split: str = "test",
     if split == "test":
         rs += SP.select_role(rows, "test_ood")
     rs = [r for r in rs if r["N"] > 0]
-    img_raw, sc_raw = features_for(rs, cache_path(cfg, Path(ddir).name), cfg.workers, log, cfg.feature)
+    img_raw, sc_raw = feats(cfg, rs, Path(ddir).name, log)
     img, sc = prepare(img_raw, sc_raw, cfg)
+    sc = sc[:, :len(norm.s_mu)]
     Z = _embed(model, img, sc, norm, dev)
     groups = np.array([str(r.get("system_id") or r["run_id"]) for r in rs])
     res: dict = {"n_clips": len(rs), "probe_r2": {}}
@@ -115,13 +116,13 @@ def interpret(run: str | Path, data_dir: str | None = None, split: str = "test",
                 e[n] = float(np.abs(P["props"][:, j] - tz[:, j]).mean())
         return e
     e0 = errs(base)
-    F = img.shape[1]
+    F = img.shape[-2]
     edges = np.linspace(0, F, 9).astype(int)
     res["band_masking"] = {"bands": [[int(a), int(b)] for a, b in zip(edges[:-1], edges[1:])],
                            "baseline_error": e0, "error_increase": []}
     for a, b in zip(edges[:-1], edges[1:]):
         im = img.astype(np.float32).copy()
-        im[:, a:b, :] = im[:, a:b, :].mean(axis=(0, 2), keepdims=True)
+        im[..., a:b, :] = im[..., a:b, :].mean(axis=(0, -1), keepdims=True)
         e = errs(predict(model, im.astype(np.float16), sc, norm, dev))
         res["band_masking"]["error_increase"].append({k: e[k] - e0[k] for k in e})
     _plots(run, Z, rs, res)
