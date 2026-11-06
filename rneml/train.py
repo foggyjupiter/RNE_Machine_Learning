@@ -65,6 +65,16 @@ class TrainConfig:
     split_seed: int = 0                  # same split for every experiment
     conformal_alpha: list = field(default_factory=lambda: [0.1, 0.05])
     gain_test: list = field(default_factory=list)   # e.g. [0.25, 0.5, 2, 4] at evaluation
+    # condition-set model (multi-condition data; see rneml.setmodel)
+    model_type: str = "clip"             # "clip" (one clip) or "set" (a system's conditions)
+    agg: str = "set"                     # set | ordered | mean
+    diff_path: str = "both"              # none | diff | both
+    norm_mode: str = "absolute"          # absolute | per_clip | per_set
+    use_condition: bool = True           # inject Γ of each clip
+    cond_dropout: float = 0.3            # drop conditions at random while training
+    max_conditions: int = 5
+    eval_condition_subsets: dict = field(default_factory=lambda: {
+        "372rpm_only": [1], "three": [0, 2, 4], "all": None})
     feature: str = "mel"                 # "mel" or "scalogram"
     use_modulation: bool = True          # modulation-spectrum features in the scalar branch
     level_free: bool = False             # remove the absolute level (per-clip mean dB, level scalars)
@@ -339,6 +349,9 @@ def calibrate(model, img, sc, y, props, mask, norm, dev, cfg) -> dict:
 # ----------------------------------------------------------------------------- training
 
 def train(cfg: TrainConfig, log=print) -> dict:
+    if cfg.model_type == "set":
+        from rneml.settrain import train_set
+        return train_set(cfg, log)
     torch.manual_seed(cfg.seed)
     if cfg.threads:
         torch.set_num_threads(cfg.threads)

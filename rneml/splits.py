@@ -1,4 +1,5 @@
-"""Data splits — always by dynamics run (``run_id``), never by clip.
+"""Data splits — always by dynamics run (``run_id``; ``system_id`` in multi-condition
+data), never by clip.
 
 The four clips of one dynamics run share the trajectory; if they were split across
 train and test, a model could recognise the trajectory instead of counting. Every
@@ -29,7 +30,9 @@ ROLES = ("train", "val", "test", "test_ood", "pairs")
 
 
 def _run_of(r: dict) -> str:
-    return str(r["run_id"])
+    """The leakage unit: the dynamics run, or the whole system in multi-condition data
+    (all conditions of one system share N, material and recording setup)."""
+    return str(r.get("system_id") or r["run_id"])
 
 
 def assign(rows: list[dict], spec: dict | None, seed: int = 0) -> list[dict]:
@@ -63,7 +66,8 @@ def assign(rows: list[dict], spec: dict | None, seed: int = 0) -> list[dict]:
         raise ValueError(f"unknown split kind {kind!r}")
 
     rng = np.random.default_rng(seed)
-    runs = sorted({_run_of(r) for r in rows if r["split"] != "pairs"})
+    # validation = 10 % of the runs in the *training region* (at least one)
+    runs = sorted({_run_of(r) for r in rows if r["split"] != "pairs" and in_train(r) is True})
     val_runs = set(rng.choice(runs, max(1, len(runs) // 10), replace=False)) if runs else set()
     pair_ok: dict = {}
     for r in rows:

@@ -6,7 +6,7 @@
     rneml ensemble outputs/a outputs/b ... --name ens [--real-dir PATH]
     rneml repeat --config configs/blind.yaml --seeds 0 1 2   # mean ± std over seeds
     rneml compare outputs/a outputs/b                   # paired test on the same clips
-    rneml ridge --real-dir PATH                         # non-deep baseline (hand-crafted features)
+    rneml baselines --real-dir PATH                     # RMS / onset / order params / ridge / GBM
     rneml report outputs/*                              # markdown comparison table
     rneml predict rec1.wav rec2.wav --run outputs/blind_mel [--run outputs/...]
 """
@@ -75,11 +75,14 @@ def main(argv=None):
     p.add_argument("run_b")
     p.add_argument("--split", default="test")
 
-    p = sub.add_parser("ridge", help="non-deep baseline: ridge on the hand-crafted features")
+    p = sub.add_parser("baselines", help="non-deep baselines on the hand-crafted features")
     p.add_argument("--config", default="configs/blind.yaml")
+    p.add_argument("--which", nargs="+", default=None,
+                   help="subset of: rms onset order_params ridge_all gbm_physics gbm_all")
     p.add_argument("--data-dir")
+    p.add_argument("--eval-data-dir")
     p.add_argument("--real-dir")
-    p.add_argument("--name", default="ridge_scalars")
+    p.add_argument("--prefix", default="base_")
 
     p = sub.add_parser("gap", help="sim-to-real gap of the hand-crafted features, by N")
     p.add_argument("--data-dir", required=True)
@@ -111,7 +114,11 @@ def main(argv=None):
         from rneml.evaluate import evaluate_run
         from rneml.train import load_config
         cfg = load_config(Path(a.run) / "config.yaml", real_dir=a.real_dir)
-        print(json.dumps(evaluate_run(a.run, cfg), indent=1))
+        if cfg.model_type == "set":
+            from rneml.settrain import evaluate_set
+            print(json.dumps(evaluate_set(a.run, cfg), indent=1))
+        else:
+            print(json.dumps(evaluate_run(a.run, cfg), indent=1))
     elif a.cmd == "ensemble":
         from pathlib import Path
 
@@ -141,11 +148,13 @@ def main(argv=None):
     elif a.cmd == "compare":
         from rneml.stats import paired_compare
         print(json.dumps(paired_compare(a.run_a, a.run_b, a.split), indent=1))
-    elif a.cmd == "ridge":
-        from rneml.baselines import run_ridge
+    elif a.cmd == "baselines":
+        from rneml.baselines import BASELINES, run_baseline
         from rneml.train import load_config
-        cfg = load_config(a.config, data_dir=a.data_dir, real_dir=a.real_dir, name=a.name)
-        run_ridge(cfg)
+        for kind in a.which or BASELINES:
+            cfg = load_config(a.config, data_dir=a.data_dir, real_dir=a.real_dir,
+                              eval_data_dir=a.eval_data_dir, name=f"{a.prefix}{kind}")
+            run_baseline(cfg, kind)
     elif a.cmd == "gap":
         from rneml.gap import BB_LIKE, gap
         from rneml.train import TrainConfig

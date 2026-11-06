@@ -239,3 +239,57 @@ def test_paired_compare_detects_better_run(tmp_path):
                                           "pred": N + rng.standard_normal() * noise}) + "\n")
     c = paired_compare(tmp_path / "a", tmp_path / "b")
     assert c["mae_diff_a_minus_b"] < 0 and c["ci95_run_bootstrap"][1] < 0 and c["wilcoxon_p"] < 1e-3
+
+
+def test_set_model_ignores_padding_and_handles_single_condition():
+    from rneml.setmodel import SetCountNet
+    torch.manual_seed(0)
+    for agg in ("set", "ordered", "mean"):
+        for diff in ("none", "diff", "both"):
+            m = SetCountNet(len(SCALAR_NAMES), len(D.AUX_NAMES), width=8, agg=agg, diff_path=diff).eval()
+            img = torch.randn(2, 4, N_MELS, 60)
+            sc = torch.randn(2, 4, len(SCALAR_NAMES))
+            g = torch.tensor([[1.35, 2.07, 3.04, 4.5], [2.07, 3.0, 9.0, 9.0]])
+            mask = torch.tensor([[True, True, True, True], [True, True, False, False]])
+            o1 = m(img, sc, g, mask)
+            img2, sc2 = img.clone(), sc.clone()
+            img2[1, 2:] = 1e3 * torch.randn_like(img2[1, 2:])     # garbage in padded slots
+            sc2[1, 2:] = -1e3
+            o2 = m(img2, sc2, g, mask)
+            assert torch.allclose(o1.n, o2.n, atol=1e-5), (agg, diff)
+            one = m(img[:, :1], sc[:, :1], g[:, :1], mask[:, :1])
+            assert one.n.shape == (2,) and torch.isfinite(one.n).all()
+
+
+def test_per_set_normalisation_removes_common_gain_keeps_differences():
+    from rneml.setmodel import normalize_levels
+    from rneml.features import BASIC_SCALARS
+    rng = np.random.default_rng(0)
+    img = rng.normal(-40, 10, (1, 3, 8, 20)).astype(np.float32)
+    img[0, 2] += 6.0                                   # one condition is louder
+    sc = rng.standard_normal((1, 3, len(SCALAR_NAMES))).astype(np.float32)
+    mask = np.array([[True, True, True]])
+    a, sa = normalize_levels(img, sc, mask, "per_set")
+    lv = [BASIC_SCALARS.index("rms_db")]
+    sc2 = sc.copy()
+    sc2[:, :, lv] += 12.0
+    b, sb = normalize_levels(img + 12.0, sc2, mask, "per_set")   # common +12 dB (gain / mass)
+    assert np.allclose(a, b, atol=1e-4) and np.allclose(sa, sb, atol=1e-4)
+    assert abs((a[0, 2].mean() - a[0, 0].mean()) - (img[0, 2].mean() - img[0, 0].mean())) < 1e-3
+    c, _ = normalize_levels(img + 12.0, sc2, mask, "per_clip")
+    assert abs(c[0, 2].mean() - c[0, 0].mean()) < 1e-3    # per_clip also removes the difference
+
+
+def test_build_sets_groups_by_system_and_sorts_by_gamma():
+    from rneml.setmodel import build_sets
+    rows = []
+    for sysid in ("r00001", "r00002"):
+        for k, g in enumerate([4.5, 1.35, 2.07]):
+            for render in (0, 1):
+                rows.append({"system_id": sysid, "run_id": f"{sysid}_c{k}", "render": render,
+                             "gamma": g, "condition_index": k, "N": 5})
+    sets = build_sets(rows)
+    assert len(sets) == 4 and all(len(s) == 3 for s in sets)
+    assert all([rows[i]["gamma"] for i in s] == [1.35, 2.07, 4.5] for s in sets)
+    assert all(len({rows[i]["render"] for i in s}) == 1 for s in sets)
+    assert all(len(s) == 1 for s in build_sets(rows, conditions=[2]))

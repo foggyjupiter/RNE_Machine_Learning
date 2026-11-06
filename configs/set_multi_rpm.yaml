@@ -1,0 +1,21 @@
+# Condition-set model on the multi-rpm dataset (v2): each sample is one system observed
+# at 300/372/450/550/650 rpm. per_set removes the dB offset common to all conditions
+# (material mass, microphone gain), keeping how the sound changes with Γ.
+name: set_multi_rpm
+data_dir: data/v1/multi_rpm
+real_dir: null
+model_type: set
+agg: set                  # set | ordered | mean
+diff_path: both           # none | diff | both
+norm_mode: per_set        # absolute | per_clip | per_set
+use_condition: true
+cond_dropout: 0.3
+feature: mel
+epochs: 60
+batch: 16
+lr: 1.0e-3
+prop_weight: 0.5
+nll_weight: 0.2
+pair_weight: 1.0
+rank_weight: 0.5
+eval_condition_subsets: {"372rpm_only": [1], "three": [0, 2, 4], "all": null}
