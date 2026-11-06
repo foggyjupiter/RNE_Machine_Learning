@@ -34,6 +34,10 @@ def main():
     ap.add_argument("--outputs", default="outputs")
     ap.add_argument("--hf-repo", default="FoggyJupiter/rne-granular-acoustics")
     ap.add_argument("--no-models", action="store_true")
+    ap.add_argument("--via-hf", action="store_true",
+                    help="machines without push access: upload everything (results and models) to "
+                         "the Hugging Face dataset under experiments/<name>/ instead of git; the "
+                         "main machine collects them with scripts/collect_hf_results.py")
     a = ap.parse_args()
     out = Path(a.outputs)
     dirs = [out / n for n in PARTS[a.part]] + ([out / "components"] if a.part == "M0" else [])
@@ -41,6 +45,22 @@ def main():
              if f.is_file() and (f.name in SMALL or f.suffix in (".png", ".md"))]
     done = [d.name for d in dirs if (d / "metrics.json").exists()]
     print(f"part {a.part}: {len(done)}/{len(PARTS[a.part])} experiments finished, {len(files)} files")
+    if a.via_hf:
+        from huggingface_hub import CommitOperationAdd, HfApi
+        up = files + ([] if a.no_models else [d / "model.pt" for d in dirs if (d / "model.pt").exists()])
+        if up:
+            ops = [CommitOperationAdd(path_in_repo=f"experiments/{f.parent.name}/{f.name}", path_or_fileobj=str(f))
+                   for f in up]
+            for i in range(5):
+                try:
+                    HfApi().create_commit(a.hf_repo, repo_type="dataset", operations=ops,
+                                          commit_message=f"suite part {a.part}: {len(done)} finished")
+                    print(f"uploaded {len(ops)} files to {a.hf_repo}/experiments/")
+                    break
+                except Exception as e:
+                    print(f"upload failed (try {i + 1}): {e!r}"[:300])
+                    time.sleep(2 ** (i + 2))
+        return
     if files:
         git("add", "-f", *map(str, files))
         if git("diff", "--cached", "--quiet", check=False).returncode != 0:
