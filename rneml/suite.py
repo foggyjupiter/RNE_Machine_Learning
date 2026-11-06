@@ -53,6 +53,9 @@ EXPERIMENTS = [
     (4, "B5_band_6k_24k", "B", "v1", "configs/blind.yaml", {"band_hz": [6000, 24000]}),
     (4, "B6_basic_scalars", "B", "v1", "configs/blind.yaml", {"scalar_set": "basic"}),
     (4, "B7_no_scalars", "B", "v1", "configs/blind.yaml", {"use_scalars": False}),
+    (2, "B9_selected_components", "B", "v1", "configs/blind.yaml",
+     {"component_scalars": "outputs/components/components.json"}),
+    (3, "B10_all_components", "B", "v1", "configs/blind.yaml", {"component_scalars": "all"}),
     (3, "B8_hpss_denoise_dann", "B", "v1", "configs/blind.yaml",
      {"feature": "mel+perc+harm", "denoise": True, "real_unlabeled_per_N": 5}),
     # E. generalisation splits

@@ -113,6 +113,12 @@ def main(argv=None):
 
     p = sub.add_parser("suite-report", help="collect finished experiments into outputs/REPORT.md")
 
+    p = sub.add_parser("components", help="which sound components tell the count apart (no deep learning)")
+    p.add_argument("--data-dir", required=True)
+    p.add_argument("--real-dir", required=True)
+    p.add_argument("--out", default="outputs/components")
+    p.add_argument("--workers", type=int, default=1)
+
     p = sub.add_parser("predict", help="N and material of new recordings")
     p.add_argument("files", nargs="+", help="wav files")
     p.add_argument("--run", action="append", required=True,
@@ -200,6 +206,9 @@ def main(argv=None):
     elif a.cmd == "suite-report":
         from rneml.suite import report
         print(report())
+    elif a.cmd == "components":
+        from rneml.components import run
+        run(a.data_dir, a.real_dir, a.out, workers=a.workers)
     elif a.cmd == "predict":
         from rneml.infer import format_result, predict_files
         res = predict_files(a.run, a.files)

@@ -67,7 +67,12 @@ def predict_runs(runs: list[Path], rows: list[dict], what: str, device, log=prin
         model, norm, c, ss = load_model(run, device)
         cfg = TrainConfig(**c)
         img, sc = feats(cfg, rows, what, log, gain)
-        n_audio = len(norm.s_mu) - len(cfg.material_input)   # older models: fewer audio scalars
+        n_extra = len(cfg.material_input)
+        if cfg.component_scalars:
+            from rneml.components import N_BANDS, TYPES, selected_columns
+            n_extra += (N_BANDS * len(TYPES) if cfg.component_scalars == "all"
+                        else len(selected_columns(cfg.component_scalars)))
+        n_audio = len(norm.s_mu) - n_extra        # older models: fewer audio scalars
         img, sc = prepare(img, sc, cfg, rows, n_audio)
         outs.append(predict(model, img, sc, norm, device, crop_frac=cfg.crop_frac,
                             tta_crops=cfg.tta_crops, sigma_scale=ss))

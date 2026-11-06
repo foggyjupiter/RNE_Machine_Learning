@@ -82,6 +82,7 @@ class TrainConfig:
     use_modulation: bool = True          # modulation-spectrum features in the scalar branch
     scalar_set: str = "all"              # all | basic (12 physics) | first_study (5: dB mean/std/max, flux, active)
     material_input: list = field(default_factory=list)  # properties GIVEN to the model (e.g. [diameter, density, mass]); [] = blind
+    component_scalars: str | None = None  # append component features: path of components.json (selected) or 'all'
     count_head: str = "regression"       # regression | classification | soft_label | coral
     class_step: int = 5                  # class / threshold spacing for the non-regression heads
     label_sigma: float = 5.0             # soft_label width [particles]
@@ -213,6 +214,12 @@ def prepare(img: np.ndarray, sc: np.ndarray, cfg: TrainConfig | dict, rows: list
         sc = sc[:, :n_scalars]
     if get("level_free"):
         img, sc = level_free(img, sc)
+    comp = get("component_scalars")
+    if comp:
+        if rows is None:
+            raise ValueError("component_scalars needs the metadata rows")
+        from rneml.components import scalar_block
+        sc = np.concatenate([sc, scalar_block(rows, comp, get("cache_dir", "cache"), get("workers", 1))], axis=1)
     names = get("material_input") or []
     if names:
         if rows is None:
