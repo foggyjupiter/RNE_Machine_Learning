@@ -35,7 +35,7 @@ import torch
 from torch import nn
 
 from rneml.features import BASIC_SCALARS
-from rneml.model import LOGVAR_MAX, LOGVAR_MIN, CountNet, Output, grad_reverse
+from rneml.model import LOGVAR_MAX, LOGVAR_MIN, CountHead, CountNet, Output, grad_reverse
 
 LEVEL_SCALARS = [BASIC_SCALARS.index(k) for k in ("db_mean", "db_max", "rms_db")]
 GAMMA_REF = 2.07
@@ -80,7 +80,8 @@ class ConditionEmbedding(nn.Module):
 class SetCountNet(nn.Module):
     def __init__(self, n_scalars: int, n_props: int, width: int = 32, dropout: float = 0.3,
                  use_scalars: bool = True, time_pool: int = 1, agg: str = "set",
-                 diff_path: str = "both", use_condition: bool = True):
+                 diff_path: str = "both", use_condition: bool = True,
+                 count_head: str = "regression", class_step: int = 5):
         super().__init__()
         self.enc = CountNet(n_scalars, 0, width, dropout, use_scalars, time_pool)
         d = 128
@@ -98,7 +99,7 @@ class SetCountNet(nn.Module):
         self.diff = nn.Sequential(nn.Linear(d, d), nn.ReLU(inplace=True))
         n_in = {"none": d, "diff": d, "both": 2 * d}[diff_path]
         self.fuse = nn.Sequential(nn.Linear(n_in, d), nn.ReLU(inplace=True), nn.Dropout(dropout))
-        self.count = nn.Linear(d, 2)
+        self.count = CountHead(d, count_head, class_step)
         self.props = nn.Linear(d, 2 * n_props) if n_props else None
         self.domain = nn.Sequential(nn.Linear(d, 64), nn.ReLU(inplace=True), nn.Linear(64, 1))
 
@@ -125,14 +126,13 @@ class SetCountNet(nn.Module):
             dz = self.diff(z[:, 1:] - z[:, :-1]) if K > 1 else z.new_zeros(B, 0, z.shape[-1])
             parts.append(self._masked_mean(dz, dm) if K > 1 else z.new_zeros(B, z.shape[-1]))
         e = self.fuse(torch.cat(parts, -1))
-        c = self.count(e)
-        n, n_lv = c[:, 0], c[:, 1].clamp(LOGVAR_MIN, LOGVAR_MAX)
+        n, n_lv, logits = self.count(e)
         if self.props is not None:
             p = self.props(e)
             pm, plv = p[:, :self.n_props], p[:, self.n_props:].clamp(LOGVAR_MIN, LOGVAR_MAX)
         else:
             pm = plv = e.new_zeros(B, 0)
-        return Output(n, n_lv, pm, plv, e)
+        return Output(n, n_lv, pm, plv, e, logits)
 
 
 def build_sets(rows: list[dict], conditions: list[int] | None = None) -> list[list[int]]:

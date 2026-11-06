@@ -1,0 +1,22 @@
+# Reproduction of the first-study model in this framework: 22.05 kHz mel (11 kHz band),
+# the first study's 5 level-bound physics features, 21-class classification (5-particle
+# steps), no material heads, no pairs. Trained on the fixed-material companion set
+# (BB only, like the recordings) and evaluated on the varied-material sets + real clips.
+name: first_study_repro
+data_dir: data/v1/bb_fixed
+eval_data_dir: data/v1
+real_dir: null
+feature: mel22k
+scalar_set: first_study
+count_head: classification
+class_step: 5
+prop_weight: 0.0
+nll_weight: 0.0
+pair_weight: 0.0
+rank_weight: 0.0
+gain_db: 0.0
+crop_frac: 1.0
+tta_crops: 0
+epochs: 60
+batch: 32
+lr: 1.0e-3

@@ -47,7 +47,7 @@ def load_model(run: str | Path, device="cpu"):
     ck = torch.load(Path(run) / "model.pt", map_location=device, weights_only=False)
     c = ck["cfg"]
     m = CountNet(ck["n_scalars"], ck["n_props"], c["width"], c["dropout"], c["use_scalars"],
-                 c.get("time_pool", 1))
+                 c.get("time_pool", 1), c.get("count_head", "regression"), c.get("class_step", 5))
     m.load_state_dict(ck["model"])
     return m.to(device).eval(), Norm.from_state(ck["norm"]), c, ck.get("sigma_scale")
 

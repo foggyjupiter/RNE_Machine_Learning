@@ -77,6 +77,10 @@ class TrainConfig:
         "372rpm_only": [1], "three": [0, 2, 4], "all": None})
     feature: str = "mel"                 # "mel" or "scalogram"
     use_modulation: bool = True          # modulation-spectrum features in the scalar branch
+    scalar_set: str = "all"              # all | basic (12 physics) | first_study (5: dB mean/std/max, flux, active)
+    count_head: str = "regression"       # regression | classification | soft_label | coral
+    class_step: int = 5                  # class / threshold spacing for the non-regression heads
+    label_sigma: float = 5.0             # soft_label width [particles]
     level_free: bool = False             # remove the absolute level (per-clip mean dB, level scalars)
     epochs: int = 60
     batch: int = 32
@@ -170,8 +174,13 @@ def prepare(img: np.ndarray, sc: np.ndarray, cfg: TrainConfig | dict):
 
 
 def scalar_columns(cfg: TrainConfig | dict, n_total: int) -> np.ndarray:
-    use_mod = cfg["use_modulation"] if isinstance(cfg, dict) else cfg.use_modulation
-    return np.arange(n_total if use_mod else len(BASIC_SCALARS))
+    get = (lambda k, d=None: cfg.get(k, d)) if isinstance(cfg, dict) else (lambda k, d=None: getattr(cfg, k, d))
+    sset = get("scalar_set", "all")
+    if sset == "first_study":
+        return np.arange(5)                          # db_mean, db_std, db_max, flux, active_ratio
+    if sset == "basic" or not get("use_modulation", True):
+        return np.arange(len(BASIC_SCALARS))
+    return np.arange(n_total)
 
 
 class Norm:
@@ -429,7 +438,7 @@ def train(cfg: TrainConfig, log=print) -> dict:
     log(f"contrast pairs: same_N {len(same_n)}, same_material {len(same_m)}")
 
     model = CountNet(sc.shape[1], props.shape[1], cfg.width, cfg.dropout, cfg.use_scalars,
-                     cfg.time_pool).to(dev)
+                     cfg.time_pool, cfg.count_head, cfg.class_step).to(dev)
     opt = torch.optim.AdamW(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
     nb = math.ceil(len(train_idx) / cfg.batch)
     total = max(cfg.epochs * nb, 1)
@@ -459,9 +468,12 @@ def train(cfg: TrainConfig, log=print) -> dict:
             S = len(sup)
             yt = torch.from_numpy(y[sup]).to(dev)
             n_hat, n_lv = o.n[:S], o.n_logvar[:S]
-            loss = huber(n_hat, yt)
-            if cfg.nll_weight:
-                loss = loss + cfg.nll_weight * _gnll(n_hat.detach(), yt, n_lv).mean()
+            if cfg.count_head == "regression":
+                loss = huber(n_hat, yt)
+                if cfg.nll_weight:
+                    loss = loss + cfg.nll_weight * _gnll(n_hat.detach(), yt, n_lv).mean()
+            else:
+                loss = model.count.loss(o.count_logits[:S], yt, cfg.label_sigma / 100.0)
             if model.props is not None and (cfg.prop_weight or cfg.nll_weight):
                 pt = torch.from_numpy(props[sup]).to(dev)
                 mk = torch.from_numpy(mask[sup]).to(dev)

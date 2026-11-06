@@ -95,7 +95,8 @@ def train_set(cfg, log=print) -> dict:
 
     norm = _set_norm(tr, img, sc, gamma, cfg.norm_mode, K, rng)
     model = SetCountNet(sc.shape[1], props.shape[1], cfg.width, cfg.dropout, cfg.use_scalars,
-                        cfg.time_pool, cfg.agg, cfg.diff_path, cfg.use_condition).to(dev)
+                        cfg.time_pool, cfg.agg, cfg.diff_path, cfg.use_condition,
+                        cfg.count_head, cfg.class_step).to(dev)
     opt = torch.optim.AdamW(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
     nb = math.ceil(len(tr) / cfg.batch)
     total = max(cfg.epochs * nb, 1)
@@ -129,9 +130,12 @@ def train_set(cfg, log=print) -> dict:
             sup = first(bs + pa + pb)
             yt = torch.from_numpy(y[sup]).to(dev)
             n_hat = o.n[:Ssup]
-            loss = huber(n_hat, yt)
-            if cfg.nll_weight:
-                loss = loss + cfg.nll_weight * _gnll(n_hat.detach(), yt, o.n_logvar[:Ssup]).mean()
+            if cfg.count_head == "regression":
+                loss = huber(n_hat, yt)
+                if cfg.nll_weight:
+                    loss = loss + cfg.nll_weight * _gnll(n_hat.detach(), yt, o.n_logvar[:Ssup]).mean()
+            else:
+                loss = model.count.loss(o.count_logits[:Ssup], yt, cfg.label_sigma / 100.0)
             if model.props is not None and cfg.prop_weight:
                 pt = torch.from_numpy(props[sup]).to(dev)
                 mk = torch.from_numpy(mask_p[sup]).to(dev)
@@ -196,7 +200,8 @@ def load_set_model(run, device="cpu"):
     ck = torch.load(Path(run) / "model.pt", map_location=device, weights_only=False)
     c = ck["cfg"]
     m = SetCountNet(ck["n_scalars"], ck["n_props"], c["width"], c["dropout"], c["use_scalars"],
-                    c.get("time_pool", 1), c["agg"], c["diff_path"], c["use_condition"])
+                    c.get("time_pool", 1), c["agg"], c["diff_path"], c["use_condition"],
+                    c.get("count_head", "regression"), c.get("class_step", 5))
     m.load_state_dict(ck["model"])
     return m.to(device).eval(), Norm.from_state(ck["norm"]), ck
 

@@ -293,3 +293,25 @@ def test_build_sets_groups_by_system_and_sorts_by_gamma():
     assert all([rows[i]["gamma"] for i in s] == [1.35, 2.07, 4.5] for s in sets)
     assert all(len({rows[i]["render"] for i in s}) == 1 for s in sets)
     assert all(len(s) == 1 for s in build_sets(rows, conditions=[2]))
+
+
+def test_count_heads_shapes_losses_and_monotone_coral():
+    from rneml.model import CountHead
+    torch.manual_seed(0)
+    e = torch.randn(6, 128)
+    y = torch.tensor([0.0, 0.05, 0.33, 0.5, 0.97, 1.0])
+    for kind in ("regression", "classification", "soft_label", "coral"):
+        h = CountHead(128, kind, 5)
+        n, lv, logits = h(e)
+        assert n.shape == (6,) and lv.shape == (6,) and torch.isfinite(n).all()
+        if kind != "regression":
+            l = h.loss(logits, y, 0.05)
+            assert torch.isfinite(l) and l > 0
+            l.backward()
+    h = CountHead(128, "coral", 5)
+    # with a huge positive projection all thresholds pass → N → 100; very negative → 0
+    with torch.no_grad():
+        h.lin.weight.fill_(1.0)
+    hi, _, _ = h(torch.full((1, 128), 10.0))
+    lo, _, _ = h(torch.full((1, 128), -10.0))
+    assert hi.item() > 0.95 and lo.item() < 0.05
