@@ -7,7 +7,7 @@
 # Label: N only (no material-property heads). Level: absolute loudness removed
 # (level_free), no random level augmentation. Shaker amplitude never varied.
 # Real evaluation: first-study clips 6-15 of every N (1-5 never scored).
-name: BX1_blackbox_nonly_blind
+name: BX3_blackbox_nonly_blind_full
 data_dir: /home/user/data/bbx_merged
 cache_dir: /home/user/data/cache
 real_dir: /home/user/foggyjupiter/2-1-cnn-/data-all
@@ -27,6 +27,6 @@ lr: 1.0e-3
 arch: cnn
 width: 16
 time_pool: 2
-patience: 8
-threads: 4
+patience: 30                  # no early stop: the validation MAE swings ±2 between epochs, so run the whole one-cycle schedule and keep the best epoch
+threads: 2
 workers: 4
