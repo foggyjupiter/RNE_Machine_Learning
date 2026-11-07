@@ -128,6 +128,14 @@ MAE는 개수 오차(개). test = 학습과 같은 물성 분포의 새 실행, 
 | U2_merged_dann | merged_nosig | `{"real_unlabeled_per_N": 5}` | 7.77 | 0.46 | 9.13 | 9.46 | 0.38 | 0.64 | 0.34 | 0.47 | -0.42 | 0.88 | -5 |
 | U3_merged_dann_known_size_weight | merged_nosig | `{"real_unlabeled_per_N": 5, "material_input": ["diameter", "density", "mass"], "prop_weight": 0.0}` | 6.54 | 0.53 | 7.67 | 8.52 | 0.40 | -7.01 | -1.43 | -1.28 | -0.09 | 0.90 | -3 |
 
+## L. 주 데이터 + 입자-벽 반발계수 0.30~0.55 보충 실행 300개 (실제 BB 벽 ≈ 0.5)
+
+| 실험 | 데이터 | 설정 | test MAE | test ±5 | OOD MAE | real MAE | real ±5 | R² 지름 | R² 밀도 | R² e_pw | corr(N,d) | 90% 구간 포함률 | real 속도 기울기 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| L1_lowe_blind | v3_lowe | – | 7.19 | 0.47 | 7.07 | 11.59 | 0.21 | 0.69 | 0.35 | 0.72 | -0.45 | 0.91 | -3 |
+| L2_lowe_dann | v3_lowe | `{"real_unlabeled_per_N": 5}` | 7.27 | 0.48 | 6.75 | 11.97 | 0.31 | 0.66 | 0.35 | 0.70 | -0.38 | 0.91 | 1 |
+| L3_lowe_dann_known_size_weight | v3_lowe | `{"real_unlabeled_per_N": 5, "material_input": ["diameter", "density", "mass"], "prop_weight": 0.0}` | 5.52 | 0.60 | 5.25 | 7.81 | 0.44 | -1.81 | -0.26 | -0.45 | 0.02 | 0.94 | 2 |
+
 ## V. 충돌별 세기 퍼짐을 뺀 주 데이터 (W에서 찾은 원인 제거: v3 동역학·실제 충돌음 50 %·녹음 조건 그대로, 세기 퍼짐 0)
 
 | 실험 | 데이터 | 설정 | test MAE | test ±5 | OOD MAE | real MAE | real ±5 | R² 지름 | R² 밀도 | R² e_pw | corr(N,d) | 90% 구간 포함률 | real 속도 기울기 |
