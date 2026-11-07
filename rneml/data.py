@@ -50,9 +50,13 @@ PROPERTIES = {
 AUX_NAMES = list(PROPERTIES)
 # first-study BB (for reporting predictions on the real recordings)
 REAL_BB = {"diameter": 6e-3, "mass": 1.2e-4, "density": 1.2e-4 / (math.pi / 6 * 6e-3 ** 3)}
+# not measured for the first-study BB: the values the sim-vs-real comparison fitted best
+# (docs/RESEARCH_NOTES.md §4 of the simulator). Used only when an experiment GIVES these
+# properties to the model and is scored on the real recordings (reported as estimates).
+REAL_BB_ESTIMATED = {"e_pp": 0.95, "e_pw": 0.70}
 
 
-DATASETS = ("v1", "v3", "bb_fixed", "multi_rpm", "v1_r2")    # v1 = repo root
+DATASETS = ("v1", "v3", "bb_fixed", "multi_rpm", "v1_r2", "v1_sig", "v1_clk")    # v1 = repo root
 
 
 def fetch(local_dir: str | Path, repo_id: str = REPO_ID, audio: bool = True,
@@ -110,9 +114,9 @@ def real_property_targets(n: int) -> tuple[np.ndarray, np.ndarray]:
 
 def material_inputs(rows: list[dict], names: list[str]) -> np.ndarray:
     """Normalised values of the given material properties, to be fed to the model as
-    inputs (the 'material known' experiments). Real recordings: only the first-study BB's
-    diameter, density and mass are known; other requested properties are set to the
-    training mean (0) — avoid requesting them when scoring real clips."""
+    inputs (the 'material known' experiments). Real recordings: the first-study BB's
+    diameter, density and mass are known; restitution gets the sim2real estimate
+    (REAL_BB_ESTIMATED); friction and modulus are unknown and set to the training mean (0)."""
     out = np.zeros((len(rows), len(names)), np.float32)
     for i, r in enumerate(rows):
         for j, n in enumerate(names):
@@ -121,6 +125,8 @@ def material_inputs(rows: list[dict], names: list[str]) -> np.ndarray:
                 out[i, j] = PROPERTIES[n][3](r[col])
             elif r.get("split") == "real" and n in REAL_BB:
                 out[i, j] = PROPERTIES[n][3](REAL_BB[n])
+            elif r.get("split") == "real" and n in REAL_BB_ESTIMATED:
+                out[i, j] = PROPERTIES[n][3](REAL_BB_ESTIMATED[n])
     return out
 
 

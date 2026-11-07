@@ -103,6 +103,8 @@ def main(argv=None):
     p.add_argument("--v1", required=True, help="main dataset folder (metadata.csv)")
     p.add_argument("--v1-r2", help="v1 re-rendered with a per-impact radiation spread")
     p.add_argument("--v1-old", help="the first v1 (before calibration), for the R0 experiments")
+    p.add_argument("--data", action="append", default=[], metavar="KEY=DIR",
+                   help="further data sets by suite key, e.g. v1_sig=data/v1_sig")
     p.add_argument("--bb-fixed", help="fixed-material companion set folder")
     p.add_argument("--multi-rpm", help="multi-condition dataset folder")
     p.add_argument("--real-dir")
@@ -210,7 +212,7 @@ def main(argv=None):
         if a.part:
             only = list(PARTS[a.part]) + list(a.only or [])
         run_suite({"v1": a.v1, "v1_old": a.v1_old, "v1_r2": a.v1_r2, "bb_fixed": a.bb_fixed,
-                   "multi_rpm": a.multi_rpm},
+                   "multi_rpm": a.multi_rpm, **dict(kv.split("=", 1) for kv in a.data)},
                   a.real_dir,
                   max_priority=a.max_priority, only=only, common=common, budget_hours=a.budget_hours,
                   reverse=a.reverse)

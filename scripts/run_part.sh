@@ -24,12 +24,14 @@ if [ "${SKIP_FETCH:-0}" != "1" ]; then
 fi
 # suite "v1" (main data) = dataset v3; the old v1 is the repository root
 V1=${V1_DIR:-$D/v3}; V1OLD=${V1OLD_DIR:-$D}; V1R2=${V1R2_DIR:-$D/v1_r2}; BB=${BB_DIR:-$D/bb_fixed}; MR=${MR_DIR:-$D/multi_rpm}
+V1SIG=${V1SIG_DIR:-$D/v1_sig}; V1CLK=${V1CLK_DIR:-$D/v1_clk}
 if [ "$PART" = "M0" ] && [ "${COMPONENTS:-1}" = "1" ]; then
   echo "COMPONENTS START $(date -u)" >> $LOG
   rneml components --data-dir "$V1" --real-dir "$R" --workers "$(nproc)" >> $LOG 2>&1
 fi
 echo "SUITE PART $PART START $(date -u)" >> $LOG
 rneml suite --part "$PART" --v1 "$V1" --v1-old "$V1OLD" --v1-r2 "$V1R2" --bb-fixed "$BB" --multi-rpm "$MR" \
+  --data "v1_sig=$V1SIG" --data "v1_clk=$V1CLK" \
   --real-dir "$R" --size cpu --threads "$(nproc)" --max-priority 5 ${REVERSE:+--reverse} >> $LOG 2>&1 &
 PID=$!
 while kill -0 $PID 2>/dev/null; do

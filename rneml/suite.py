@@ -128,6 +128,26 @@ EXPERIMENTS = [
       "component_scalars": "outputs/components/components.json", "real_exclude_per_N": 5}),
     (3, "R4_r2_hpss_denoise_dann", "R", "v1_r2", "configs/blind.yaml",
      {"feature": "mel+perc+harm", "denoise": True, "real_unlabeled_per_N": 5}),
+    # W. why did the calibrated acoustics transfer worse to the real recordings (R0 11.5 vs
+    # R1 27.5, overestimating N ≤ 50 by ~40)? The two acoustic changes of R1 separately, on
+    # the same old v1 dynamics: per-impact radiation spread only / real recorded clicks only.
+    (3, "W1_sigma_only_blind", "W", "v1_sig", "configs/blind.yaml", {}),
+    (3, "W2_clicks_only_blind", "W", "v1_clk", "configs/blind.yaml", {}),
+    # K. which material properties help when given (main data). Real recordings: diameter,
+    # density, mass are the BB's measured values; restitution = sim2real estimate (0.95 /
+    # 0.70); friction and modulus unknown → training mean, so their real column is only
+    # indicative.
+    *[(3, f"K{i}_{n}", "K", "v1", "configs/blind.yaml", {"material_input": props, "prop_weight": 0.0})
+      for i, (n, props) in enumerate([
+          ("diameter", ["diameter"]),
+          ("mass", ["mass"]),
+          ("density", ["density"]),
+          ("diameter_mass", ["diameter", "mass"]),
+          ("restitution", ["e_pp", "e_pw"]),
+          ("friction", ["mu_pp", "mu_pw"]),
+          ("modulus", ["E"]),
+          ("size_weight_restitution", ["diameter", "density", "mass", "e_pp", "e_pw"]),
+      ], start=1)],
     # S. repeated seeds of the key comparisons
     *[(5, f"S_A1_blind_s{s}", "S", "v1", "configs/blind.yaml", {"seed": s}) for s in (1, 2)],
     *[(5, f"S_A2_known_size_weight_s{s}", "S", "v1", "configs/blind.yaml",
@@ -154,12 +174,16 @@ PARTS = {
            "D_regression", "D_classification", "D_soft_label", "D_coral"],
     "M3": ["H1_set_per_set", "H2_set_absolute", "H3_set_per_clip", "H4_set_diff_only", "H5_set_no_diff",
            "H6_set_ordered", "H7_set_no_condition_value", "H8_set_known_size_weight"],
+    "M4": ["K1_diameter", "K2_mass", "K3_density", "K4_diameter_mass", "K5_restitution", "K6_friction",
+           "K7_modulus", "K8_size_weight_restitution"],
+    "M5": ["W1_sigma_only_blind", "W2_clicks_only_blind"],
 }
 PART_DATA = {"M0": ["v1", "v1_old", "v1_r2", "bb_fixed"], "M1a": ["v1"], "M1b": ["v1"], "M2": ["v1"],
-             "M3": ["multi_rpm"]}
+             "M3": ["multi_rpm"], "M4": ["v1"], "M5": ["v1_sig", "v1_clk"]}
 # suite data key → data set name on Hugging Face (rneml fetch --sets): the main data "v1" of
 # the suite is dataset v3 (calibrated); the old v1 is the repository root
-SUITE_TO_HF = {"v1": "v3", "v1_old": "v1", "v1_r2": "v1_r2", "bb_fixed": "bb_fixed", "multi_rpm": "multi_rpm"}
+SUITE_TO_HF = {"v1": "v3", "v1_old": "v1", "v1_r2": "v1_r2", "bb_fixed": "bb_fixed", "multi_rpm": "multi_rpm",
+               "v1_sig": "v1_sig", "v1_clk": "v1_clk"}
 
 GROUP_TITLES = {
     "A": "A. 물질을 알려 주면 얼마나 좋아지나 (블라인드 vs 크기·무게 앎 vs 전부 앎 vs 물질 고정 학습)",
@@ -172,6 +196,8 @@ GROUP_TITLES = {
     "H": "H. 다중 조건 (5개 rpm) 모델",
     "Z": "Z. 큰 모델 (ResNet + SE + 시간축 트랜스포머)",
     "R": "R. 실측 보정의 효과 (R0 = 보정 전 v1, R1~R4 = 보정 전 동역학 + 보정한 소리, A = 동역학·소리 모두 보정한 v3)",
+    "W": "W. 보정한 소리가 실측에서 나빠진 원인 (충돌별 세기 차이만 / 실제 충돌음만, 동역학은 보정 전 v1)",
+    "K": "K. 어떤 물성을 알려 주면 도움이 되나 (주 데이터, 실측에서 지름·밀도·질량은 실제 값, 반발계수는 추정값, 마찰·탄성률은 모름)",
     "S": "S. 시드 반복",
 }
 
