@@ -502,8 +502,11 @@ def train(cfg: TrainConfig, log=print) -> dict:
     by_key: dict = {}
     for k, r in enumerate(sim_rows[ntr + nva:], start=ntr + nva):
         by_key.setdefault((r["pair_id"], int(r["render"])), []).append(k)
-    same_n = [tuple(v) for (pid, _), v in by_key.items() if len(v) == 2 and pid.startswith("pN")]
-    same_m = [tuple(v) for (pid, _), v in by_key.items() if len(v) == 2 and pid.startswith("pM")]
+    # merged data sets prefix ids with "<set>:" (scripts/merge_datasets.py); the pair kind is
+    # the first letters of the original id
+    kind = lambda pid: pid.rsplit(":", 1)[-1][:2]
+    same_n = [tuple(v) for (pid, _), v in by_key.items() if len(v) == 2 and kind(pid) == "pN"]
+    same_m = [tuple(v) for (pid, _), v in by_key.items() if len(v) == 2 and kind(pid) == "pM"]
     pool = [(a, b, 0) for a, b in same_n] + [(a, b, 1) for a, b in same_m]
     log(f"contrast pairs: same_N {len(same_n)}, same_material {len(same_m)}")
 
