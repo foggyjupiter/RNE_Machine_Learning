@@ -12,6 +12,7 @@ experiments/<name>/model.pt (too big for git). Safe to run repeatedly.
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 import time
@@ -64,7 +65,8 @@ def main():
     if files:
         git("add", "-f", *map(str, files))
         if git("diff", "--cached", "--quiet", check=False).returncode != 0:
-            git("commit", "-m", f"실험 결과 {a.part}: {len(done)}개 완료 ({', '.join(done)})")
+            git("commit", "-m", f"실험 결과 {a.part}: {len(done)}개 완료 ({', '.join(done)})",
+                *(["-m", os.environ["COMMIT_TRAILER"]] if os.environ.get("COMMIT_TRAILER") else []))
         branch = git("branch", "--show-current").stdout.strip()
         for i in range(6):
             git("pull", "--rebase", "origin", branch, check=False)
