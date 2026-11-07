@@ -403,7 +403,13 @@ def test_suite_parts_cover_every_experiment_once():
     assert set(SUITE_TO_HF.values()) <= set(DATASETS)
     data_of = {e[1]: e[3] for e in EXPERIMENTS}
     for part, exps in PARTS.items():
-        assert {data_of[n] for n in exps} <= set(PART_DATA[part])
+        from rneml.suite import DERIVED_DATA
+        need = {data_of[n] for n in exps}
+        for k in list(need):
+            if k in DERIVED_DATA:
+                need.discard(k)
+                need.update(DERIVED_DATA[k])
+        assert need <= set(PART_DATA[part])
 
 
 def test_silent_band_gives_finite_features():

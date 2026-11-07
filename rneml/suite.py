@@ -151,6 +151,22 @@ EXPERIMENTS = [
         ("dann_s1", {"real_unlabeled_per_N": 5, "seed": 1}),
         ("real_labeled_1", {"real_train_per_N": 1}),
     ], start=1)],
+    # Q. cross-validation of the real adaptation clips: the block of 5 clips per N used for
+    # adaptation rotates (fold 1 = clips 6-10, fold 2 = 11-15; clips 1-5 are never scored)
+    *[(3, f"Q{i}_cv_{n}_f{f}", "Q", "v3_nosig", "configs/blind.yaml", {**o, "real_fold": f})
+      for i, (n, o, f) in enumerate([(n, o, f) for n, o in [
+          ("real_labeled_5", {"real_train_per_N": 5}),
+          ("dann", {"real_unlabeled_per_N": 5}),
+          ("dann_known_size_weight", {"real_unlabeled_per_N": 5,
+                                      "material_input": ["diameter", "density", "mass"], "prop_weight": 0.0}),
+      ] for f in (1, 2)], start=1)],
+    # U. single-clip models on the union of the single-speed and multi-speed data (no spread)
+    *[(3, f"U{i}_merged_{n}", "U", "merged_nosig", "configs/blind.yaml", o) for i, (n, o) in enumerate([
+        ("blind", {}),
+        ("dann", {"real_unlabeled_per_N": 5}),
+        ("dann_known_size_weight", {"real_unlabeled_per_N": 5,
+                                    "material_input": ["diameter", "density", "mass"], "prop_weight": 0.0}),
+    ], start=1)],
     # multi-condition data (v2) re-rendered without the per-impact radiation spread
     (3, "H9_nosig_set_per_set", "H", "multi_rpm_nosig", "configs/set_multi_rpm.yaml", {}),
     (3, "H10_nosig_set_known_size_weight", "H", "multi_rpm_nosig", "configs/set_multi_rpm.yaml",
@@ -204,10 +220,16 @@ PARTS = {
            "V5_nosig_hpss_denoise_dann", "V6_nosig_real_labeled_2", "V7_nosig_real_labeled_5"],
     "M7": ["V8_nosig_dann_known_size_weight", "V9_nosig_blind_s1", "V10_nosig_dann_s1", "V11_nosig_real_labeled_1"],
     "M8": ["H9_nosig_set_per_set", "H10_nosig_set_known_size_weight", "H11_nosig_set_dann"],
+    "M9": ["Q1_cv_real_labeled_5_f1", "Q2_cv_real_labeled_5_f2", "Q3_cv_dann_f1", "Q4_cv_dann_f2",
+           "Q5_cv_dann_known_size_weight_f1", "Q6_cv_dann_known_size_weight_f2"],
+    "M10": ["U1_merged_blind", "U2_merged_dann", "U3_merged_dann_known_size_weight"],
 }
 PART_DATA = {"M0": ["v1", "v1_old", "v1_r2", "bb_fixed"], "M1a": ["v1"], "M1b": ["v1"], "M2": ["v1"],
              "M3": ["multi_rpm"], "M4": ["v1"], "M5": ["v1_sig", "v1_clk"],
-             "M6": ["v3_nosig"], "M7": ["v3_nosig"], "M8": ["multi_rpm_nosig"]}
+             "M6": ["v3_nosig"], "M7": ["v3_nosig"], "M8": ["multi_rpm_nosig"],
+             "M9": ["v3_nosig"], "M10": ["v3_nosig", "multi_rpm_nosig"]}
+# data keys built on the machine from downloaded sets (scripts/merge_datasets.py, run_part.sh)
+DERIVED_DATA = {"merged_nosig": ["v3_nosig", "multi_rpm_nosig"]}
 # suite data key → data set name on Hugging Face (rneml fetch --sets): the main data "v1" of
 # the suite is dataset v3 (calibrated); the old v1 is the repository root
 SUITE_TO_HF = {"v1": "v3", "v1_old": "v1", "v1_r2": "v1_r2", "bb_fixed": "bb_fixed", "multi_rpm": "multi_rpm",
@@ -226,6 +248,8 @@ GROUP_TITLES = {
     "Z": "Z. 큰 모델 (ResNet + SE + 시간축 트랜스포머)",
     "R": "R. 실측 보정의 효과 (R0 = 보정 전 v1, R1~R4 = 보정 전 동역학 + 보정한 소리, A = 동역학·소리 모두 보정한 v3)",
     "W": "W. 보정한 소리가 실측에서 나빠진 원인 (충돌별 세기 차이만 / 실제 충돌음만, 동역학은 보정 전 v1)",
+    "Q": "Q. 실측 적응 녹음의 교차검증 (적응에 쓰는 녹음 번호 5개 묶음을 바꿔 가며; 1~5번은 평가하지 않음)",
+    "U": "U. 단일 속도 + 다중 속도 데이터를 합쳐 학습한 단일 클립 모델 (세기 퍼짐 없음)",
     "V": "V. 충돌별 세기 퍼짐을 뺀 주 데이터 (W에서 찾은 원인 제거: v3 동역학·실제 충돌음 50 %·녹음 조건 그대로, 세기 퍼짐 0)",
     "K": "K. 어떤 물성을 알려 주면 도움이 되나 (주 데이터, 실측에서 지름·밀도·질량은 실제 값, 반발계수는 추정값, 마찰·탄성률은 모름)",
     "S": "S. 시드 반복",

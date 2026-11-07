@@ -59,6 +59,8 @@ class TrainConfig:
     real_repeat: int = 10                # oversampling of the labeled real clips
     real_unlabeled_per_N: int = 0        # unlabeled real clips per N for domain adaptation
     real_exclude_per_N: int = 0          # real clips per N used elsewhere (e.g. component selection): never scored
+    real_fold: int = 0                   # cross-validation of the real adaptation clips: block of 5 clips per N
+                                         # (fold 0 = clips 1-5, 1 = 6-10, 2 = 11-15) used for adaptation
     dann_weight: float = 0.3             # max weight of the domain-adversarial loss
     real_unlabeled_per_batch: int = 8
     train_subset: str = "all"            # "all" (blind) or "bb_like" (known-material baseline)
@@ -384,15 +386,18 @@ def real_split(cfg: TrainConfig | dict) -> tuple[list[dict], list[dict], list[di
         return [], [], []
     rr = D.real_recordings(g("real_dir"))
     nl, nu = g("real_train_per_N"), g("real_unlabeled_per_N")
-    nx = (cfg.get("real_exclude_per_N", 0) if isinstance(cfg, dict) else getattr(cfg, "real_exclude_per_N", 0))
+    opt = (lambda k, d: cfg.get(k, d)) if isinstance(cfg, dict) else (lambda k, d: getattr(cfg, k, d))
+    nx = opt("real_exclude_per_N", 0)
+    lo = 5 * int(opt("real_fold", 0))      # adaptation block: clips lo+1 .. lo+5 of every N
     lab, unl, test = [], [], []
     for r in rr:
         k = int(r["run_id"].split("-")[1])
-        if k <= nl:
+        j = k - lo
+        if 1 <= j <= nl:
             lab.append(r)
-        elif k <= nl + nu:
+        elif nl < j <= nl + nu:
             unl.append(r)
-        elif k > nx:
+        elif (lo == 0 and k > max(nx, nl + nu)) or (lo > 0 and k > nx and not 1 <= j <= 5):
             test.append(r)
     return lab, unl, test
 
