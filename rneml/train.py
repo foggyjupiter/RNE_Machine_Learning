@@ -102,6 +102,7 @@ class TrainConfig:
     dropout: float = 0.3
     use_scalars: bool = True
     prop_weight: float = 0.5
+    n_only: bool = False                 # label N only: no material-property heads at all
     nll_weight: float = 0.2
     pair_weight: float = 1.0
     rank_weight: float = 0.5
@@ -464,6 +465,8 @@ def train(cfg: TrainConfig, log=print) -> dict:
     img, sc = prepare(img, sc, cfg, sim_rows)
     y = np.array([r["N"] for r in sim_rows], np.float32) / 100.0
     props = np.stack([D.aux_targets(r) for r in sim_rows])
+    if cfg.n_only:                                       # no property targets, no property head
+        props = props[:, :0]
     mask = np.ones_like(props)
     mask[y == 0] = 0.0                                   # an empty box has no material
     is_real = np.zeros(len(sim_rows), bool)
@@ -479,6 +482,8 @@ def train(cfg: TrainConfig, log=print) -> dict:
         yr = np.array([r["N"] for r in rr], np.float32) / 100.0
         y = np.concatenate([y, yr])
         rp, rm = D.real_property_targets(len(rr))
+        if cfg.n_only:
+            rp, rm = rp[:, :0], rm[:, :0]
         rm[yr == 0] = 0.0
         props, mask = np.concatenate([props, rp]), np.concatenate([mask, rm])
         is_real = np.concatenate([is_real, np.ones(len(rr), bool)])
