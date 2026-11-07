@@ -143,7 +143,19 @@ EXPERIMENTS = [
         ("hpss_denoise_dann", {"feature": "mel+perc+harm", "denoise": True, "real_unlabeled_per_N": 5}),
         ("real_labeled_2", {"real_train_per_N": 2}),
         ("real_labeled_5", {"real_train_per_N": 5}),
+        # follow-ups after V1-V7: the two best (DANN, known size/weight) combined, seed
+        # repeats of the key results, and the smallest amount of labelled real data
+        ("dann_known_size_weight", {"real_unlabeled_per_N": 5,
+                                    "material_input": ["diameter", "density", "mass"], "prop_weight": 0.0}),
+        ("blind_s1", {"seed": 1}),
+        ("dann_s1", {"real_unlabeled_per_N": 5, "seed": 1}),
+        ("real_labeled_1", {"real_train_per_N": 1}),
     ], start=1)],
+    # multi-condition data (v2) re-rendered without the per-impact radiation spread
+    (3, "H9_nosig_set_per_set", "H", "multi_rpm_nosig", "configs/set_multi_rpm.yaml", {}),
+    (3, "H10_nosig_set_known_size_weight", "H", "multi_rpm_nosig", "configs/set_multi_rpm.yaml",
+     {"material_input": ["diameter", "density", "mass"], "prop_weight": 0.0}),
+    (3, "H11_nosig_set_dann", "H", "multi_rpm_nosig", "configs/set_multi_rpm.yaml", {"real_unlabeled_per_N": 5}),
     # K. which material properties help when given (main data). Real recordings: diameter,
     # density, mass are the BB's measured values; restitution = sim2real estimate (0.95 /
     # 0.70); friction and modulus unknown → training mean, so their real column is only
@@ -190,14 +202,17 @@ PARTS = {
     "M5": ["W1_sigma_only_blind", "W2_clicks_only_blind"],
     "M6": ["V1_nosig_blind", "V2_nosig_known_size_weight", "V3_nosig_known_all", "V4_nosig_dann",
            "V5_nosig_hpss_denoise_dann", "V6_nosig_real_labeled_2", "V7_nosig_real_labeled_5"],
+    "M7": ["V8_nosig_dann_known_size_weight", "V9_nosig_blind_s1", "V10_nosig_dann_s1", "V11_nosig_real_labeled_1"],
+    "M8": ["H9_nosig_set_per_set", "H10_nosig_set_known_size_weight", "H11_nosig_set_dann"],
 }
 PART_DATA = {"M0": ["v1", "v1_old", "v1_r2", "bb_fixed"], "M1a": ["v1"], "M1b": ["v1"], "M2": ["v1"],
              "M3": ["multi_rpm"], "M4": ["v1"], "M5": ["v1_sig", "v1_clk"],
-             "M6": ["v3_nosig"]}
+             "M6": ["v3_nosig"], "M7": ["v3_nosig"], "M8": ["multi_rpm_nosig"]}
 # suite data key → data set name on Hugging Face (rneml fetch --sets): the main data "v1" of
 # the suite is dataset v3 (calibrated); the old v1 is the repository root
 SUITE_TO_HF = {"v1": "v3", "v1_old": "v1", "v1_r2": "v1_r2", "bb_fixed": "bb_fixed", "multi_rpm": "multi_rpm",
-               "v1_sig": "v1_sig", "v1_clk": "v1_clk", "v3_nosig": "v3_nosig"}
+               "v1_sig": "v1_sig", "v1_clk": "v1_clk", "v3_nosig": "v3_nosig",
+               "multi_rpm_nosig": "multi_rpm_nosig"}
 
 GROUP_TITLES = {
     "A": "A. 물질을 알려 주면 얼마나 좋아지나 (블라인드 vs 크기·무게 앎 vs 전부 앎 vs 물질 고정 학습)",
