@@ -133,6 +133,17 @@ EXPERIMENTS = [
     # the same old v1 dynamics: per-impact radiation spread only / real recorded clicks only.
     (3, "W1_sigma_only_blind", "W", "v1_sig", "configs/blind.yaml", {}),
     (3, "W2_clicks_only_blind", "W", "v1_clk", "configs/blind.yaml", {}),
+    # V. the fix suggested by W: main data (v3 dynamics, 50 % real clicks, all recording
+    # conditions) re-rendered with the per-impact radiation spread switched off (sigma = 0).
+    *[(3, f"V{i}_nosig_{n}", "V", "v3_nosig", "configs/blind.yaml", o) for i, (n, o) in enumerate([
+        ("blind", {}),
+        ("known_size_weight", {"material_input": ["diameter", "density", "mass"], "prop_weight": 0.0}),
+        ("known_all", {"material_input": ALL_PROPS, "prop_weight": 0.0}),
+        ("dann", {"real_unlabeled_per_N": 5}),
+        ("hpss_denoise_dann", {"feature": "mel+perc+harm", "denoise": True, "real_unlabeled_per_N": 5}),
+        ("real_labeled_2", {"real_train_per_N": 2}),
+        ("real_labeled_5", {"real_train_per_N": 5}),
+    ], start=1)],
     # K. which material properties help when given (main data). Real recordings: diameter,
     # density, mass are the BB's measured values; restitution = sim2real estimate (0.95 /
     # 0.70); friction and modulus unknown → training mean, so their real column is only
@@ -177,13 +188,16 @@ PARTS = {
     "M4": ["K1_diameter", "K2_mass", "K3_density", "K4_diameter_mass", "K5_restitution", "K6_friction",
            "K7_modulus", "K8_size_weight_restitution"],
     "M5": ["W1_sigma_only_blind", "W2_clicks_only_blind"],
+    "M6": ["V1_nosig_blind", "V2_nosig_known_size_weight", "V3_nosig_known_all", "V4_nosig_dann",
+           "V5_nosig_hpss_denoise_dann", "V6_nosig_real_labeled_2", "V7_nosig_real_labeled_5"],
 }
 PART_DATA = {"M0": ["v1", "v1_old", "v1_r2", "bb_fixed"], "M1a": ["v1"], "M1b": ["v1"], "M2": ["v1"],
-             "M3": ["multi_rpm"], "M4": ["v1"], "M5": ["v1_sig", "v1_clk"]}
+             "M3": ["multi_rpm"], "M4": ["v1"], "M5": ["v1_sig", "v1_clk"],
+             "M6": ["v3_nosig"]}
 # suite data key → data set name on Hugging Face (rneml fetch --sets): the main data "v1" of
 # the suite is dataset v3 (calibrated); the old v1 is the repository root
 SUITE_TO_HF = {"v1": "v3", "v1_old": "v1", "v1_r2": "v1_r2", "bb_fixed": "bb_fixed", "multi_rpm": "multi_rpm",
-               "v1_sig": "v1_sig", "v1_clk": "v1_clk"}
+               "v1_sig": "v1_sig", "v1_clk": "v1_clk", "v3_nosig": "v3_nosig"}
 
 GROUP_TITLES = {
     "A": "A. 물질을 알려 주면 얼마나 좋아지나 (블라인드 vs 크기·무게 앎 vs 전부 앎 vs 물질 고정 학습)",
@@ -197,6 +211,7 @@ GROUP_TITLES = {
     "Z": "Z. 큰 모델 (ResNet + SE + 시간축 트랜스포머)",
     "R": "R. 실측 보정의 효과 (R0 = 보정 전 v1, R1~R4 = 보정 전 동역학 + 보정한 소리, A = 동역학·소리 모두 보정한 v3)",
     "W": "W. 보정한 소리가 실측에서 나빠진 원인 (충돌별 세기 차이만 / 실제 충돌음만, 동역학은 보정 전 v1)",
+    "V": "V. 충돌별 세기 퍼짐을 뺀 주 데이터 (W에서 찾은 원인 제거: v3 동역학·실제 충돌음 50 %·녹음 조건 그대로, 세기 퍼짐 0)",
     "K": "K. 어떤 물성을 알려 주면 도움이 되나 (주 데이터, 실측에서 지름·밀도·질량은 실제 값, 반발계수는 추정값, 마찰·탄성률은 모름)",
     "S": "S. 시드 반복",
 }
