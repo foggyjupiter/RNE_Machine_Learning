@@ -25,7 +25,7 @@ if [ "${SKIP_FETCH:-0}" != "1" ]; then
 fi
 # suite "v1" (main data) = dataset v3; the old v1 is the repository root
 V1=${V1_DIR:-$D/v3}; V1OLD=${V1OLD_DIR:-$D}; V1R2=${V1R2_DIR:-$D/v1_r2}; BB=${BB_DIR:-$D/bb_fixed}; MR=${MR_DIR:-$D/multi_rpm}
-V1SIG=${V1SIG_DIR:-$D/v1_sig}; V1CLK=${V1CLK_DIR:-$D/v1_clk}; V3NOSIG=${V3NOSIG_DIR:-$D/v3_nosig}; MRNOSIG=${MRNOSIG_DIR:-$D/multi_rpm_nosig}; MERGED=${MERGED_DIR:-$D/merged_nosig}
+V1SIG=${V1SIG_DIR:-$D/v1_sig}; V1CLK=${V1CLK_DIR:-$D/v1_clk}; V3NOSIG=${V3NOSIG_DIR:-$D/v3_nosig}; MRNOSIG=${MRNOSIG_DIR:-$D/multi_rpm_nosig}; MERGED=${MERGED_DIR:-$D/merged_nosig}; V3LOWE=${V3LOWE_DIR:-$D/v3_lowe}
 if [ "$PART" = "M0" ] && [ "${COMPONENTS:-1}" = "1" ]; then
   echo "COMPONENTS START $(date -u)" >> $LOG
   rneml components --data-dir "$V1" --real-dir "$R" --workers "$(nproc)" >> $LOG 2>&1
@@ -33,9 +33,12 @@ fi
 if [ "$PART" = "M10" ] && [ ! -f "$MERGED/metadata.csv" ]; then
   python3 scripts/merge_datasets.py "$MERGED" "$D/v3_nosig" "$D/multi_rpm_nosig" >> $LOG 2>&1
 fi
+if [ "$PART" = "M11" ] && [ ! -f "$V3LOWE/metadata.csv" ]; then
+  python3 scripts/merge_datasets.py "$V3LOWE" "$D/v3_nosig" "$D/lowe" >> $LOG 2>&1
+fi
 echo "SUITE PART $PART START $(date -u)" >> $LOG
 rneml suite --part "$PART" --v1 "$V1" --v1-old "$V1OLD" --v1-r2 "$V1R2" --bb-fixed "$BB" --multi-rpm "$MR" \
-  --data "v1_sig=$V1SIG" --data "v1_clk=$V1CLK" --data "v3_nosig=$V3NOSIG" --data "multi_rpm_nosig=$MRNOSIG" --data "merged_nosig=$MERGED" \
+  --data "v1_sig=$V1SIG" --data "v1_clk=$V1CLK" --data "v3_nosig=$V3NOSIG" --data "multi_rpm_nosig=$MRNOSIG" --data "merged_nosig=$MERGED" --data "v3_lowe=$V3LOWE" \
   --real-dir "$R" --size cpu --threads "$(nproc)" --max-priority 5 ${REVERSE:+--reverse} \
   ${ONLY:+--only $ONLY} >> $LOG 2>&1 &
 PID=$!
