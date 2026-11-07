@@ -1,0 +1,75 @@
+name: B3_mel22k
+data_dir: data/v3
+eval_data_dir: null
+cache_dir: cache
+out_dir: outputs
+real_dir: real_src/data-all
+real_train_per_N: 0
+real_repeat: 10
+real_unlabeled_per_N: 0
+real_exclude_per_N: 5
+dann_weight: 0.3
+real_unlabeled_per_batch: 8
+train_subset: all
+split: null
+split_seed: 0
+conformal_alpha:
+- 0.1
+- 0.05
+gain_test: []
+model_type: clip
+agg: set
+diff_path: both
+norm_mode: absolute
+use_condition: true
+cond_dropout: 0.3
+max_conditions: 5
+eval_condition_subsets:
+  372rpm_only:
+  - 1
+  three:
+  - 0
+  - 2
+  - 4
+  all: null
+feature: mel22k
+denoise: false
+noise_ref: null
+band_hz: null
+use_modulation: true
+scalar_set: all
+material_input: []
+component_scalars: null
+count_head: regression
+class_step: 5
+label_sigma: 5.0
+level_free: false
+epochs: 30
+batch: 32
+lr: 0.001
+weight_decay: 0.0001
+arch: cnn
+temporal: transformer
+amp: true
+width: 16
+time_pool: 2
+dropout: 0.3
+use_scalars: true
+prop_weight: 0.5
+nll_weight: 0.2
+pair_weight: 1.0
+rank_weight: 0.5
+rank_margin: 0.02
+pairs_per_batch: 8
+gain_db: 3.0
+crop_frac: 0.8
+tta_crops: 4
+spec_time_masks: 2
+spec_freq_masks: 2
+calibrate_sigma: true
+patience: 8
+seed: 0
+workers: 4
+threads: 4
+device: auto
+extra: {}
