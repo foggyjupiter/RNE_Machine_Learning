@@ -134,21 +134,28 @@ def _plots(run: Path, Z, rs, res):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    from matplotlib import font_manager
 
+    if any("WenQuanYi Zen Hei" in f.name for f in font_manager.fontManager.ttflist):
+        plt.rcParams.update({"font.family": "WenQuanYi Zen Hei", "axes.unicode_minus": False})
     Zc = Z - Z.mean(0)
     U, S, Vt = np.linalg.svd(Zc, full_matrices=False)
     P = Zc @ Vt[:2].T
-    cols = [("N", np.array([r["N"] for r in rs]), "N"),
-            ("diameter", np.array([r["particle_diameter_m"] for r in rs]) * 1e3, "diameter [mm]"),
-            ("density", np.array([r["particle_density"] for r in rs]), "density [kg/m³]"),
-            ("e_pw", np.array([r["restitution_pw"] for r in rs]), "e (particle-wall)")]
+    np.savez(run / "embedding_pca.npz", P=P, N=np.array([r["N"] for r in rs]),
+             diameter_mm=np.array([r["particle_diameter_m"] for r in rs]) * 1e3,
+             density=np.array([r["particle_density"] for r in rs]), e_pw=np.array([r["restitution_pw"] for r in rs]))
+    cols = [("N", np.array([r["N"] for r in rs]), "개수 N"),
+            ("diameter", np.array([r["particle_diameter_m"] for r in rs]) * 1e3, "지름 [mm]"),
+            ("density", np.array([r["particle_density"] for r in rs]), "밀도 [kg/m³]"),
+            ("e_pw", np.array([r["restitution_pw"] for r in rs]), "반발계수 (입자-벽)")]
     fig, ax = plt.subplots(1, 4, figsize=(17, 4))
     for a, (_, v, lab) in zip(ax, cols):
         s = a.scatter(P[:, 0], P[:, 1], c=v, s=6, cmap="viridis")
         fig.colorbar(s, ax=a, label=lab)
         a.set_xticks([])
         a.set_yticks([])
-    ax[0].set_title("embedding PCA, coloured by N")
+    for a, (_, _, lab) in zip(ax, cols):
+        a.set_title(f"내부 표현의 주성분 지도 — 색: {lab}", fontsize=9)
     fig.tight_layout()
     fig.savefig(run / "embedding_map.png", dpi=110)
     plt.close(fig)
@@ -158,11 +165,12 @@ def _plots(run: Path, Z, rs, res):
     x = np.arange(len(bm["bands"]))
     for i, k in enumerate(keys):
         inc = np.array([d[k] for d in bm["error_increase"]]) / max(bm["baseline_error"][k], 1e-9)
-        ax.bar(x + i * 0.15, inc, 0.15, label=k)
+        ax.bar(x + i * 0.15, inc, 0.15, label={"N": "개수 N", "diameter": "지름", "density": "밀도",
+                                                "e_pw": "반발계수 입자-벽", "e_pp": "반발계수 입자-입자"}.get(k, k))
     ax.set_xticks(x + 0.3)
     ax.set_xticklabels([f"{a}-{b}" for a, b in bm["bands"]], rotation=30)
-    ax.set_xlabel("masked band (image rows, low → high frequency)")
-    ax.set_ylabel("relative error increase")
+    ax.set_xlabel("가린 대역 (멜 밴드 번호, 낮은 → 높은 주파수)")
+    ax.set_ylabel("오차 증가 비율")
     ax.legend(fontsize=8)
     fig.tight_layout()
     fig.savefig(run / "band_masking.png", dpi=110)
