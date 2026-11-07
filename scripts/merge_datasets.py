@@ -4,7 +4,8 @@
 
 Writes OUT/metadata.csv with the columns common to all sources; file_name becomes
 <source folder name>/<file_name> and OUT/<source folder name> is a symlink to the source.
-pair_id / run_id get the source name as prefix so contrast pairs never cross data sets.
+run_id / pair_id / system_id get the source name as prefix: the splits group by system_id
+(or run_id), and the run names of different sweeps overlap (pM0002a in both v3 and multi_rpm).
 Each source keeps its own split column (train / val / test / test_ood / pairs).
 """
 import csv
@@ -31,7 +32,7 @@ def main(out, *srcs):
             for r in rows:
                 r = {c: r[c] for c in cols}
                 r["file_name"] = f"{s.name}/{r['file_name']}"
-                for k in ("run_id", "pair_id"):
+                for k in ("run_id", "pair_id", "system_id"):
                     if k in r and r[k]:
                         r[k] = f"{s.name}:{r[k]}"
                 w.writerow(r)
