@@ -109,6 +109,25 @@ MAE는 개수 오차(개). test = 학습과 같은 물성 분포의 새 실행, 
 | W1_sigma_only_blind | v1_sig | – | 7.81 | 0.46 | 9.94 | 25.94 | 0.16 | 0.72 | 0.43 | 0.41 | -0.52 | 0.93 | -8 |
 | W2_clicks_only_blind | v1_clk | – | 6.17 | 0.58 | 7.87 | 13.78 | 0.15 | 0.72 | 0.43 | 0.49 | -0.57 | 0.93 | -7 |
 
+## Q. 실측 적응 녹음의 교차검증 (적응에 쓰는 녹음 번호 5개 묶음을 바꿔 가며; 1~5번은 평가하지 않음)
+
+| 실험 | 데이터 | 설정 | test MAE | test ±5 | OOD MAE | real MAE | real ±5 | R² 지름 | R² 밀도 | R² e_pw | corr(N,d) | 90% 구간 포함률 | real 속도 기울기 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Q1_cv_real_labeled_5_f1 | v3_nosig | `{"real_train_per_N": 5, "real_fold": 1}` | 6.78 | 0.51 | 7.23 | 6.08 | 0.53 | 0.65 | 0.38 | 0.65 | -0.41 | 0.88 | -4 |
+| Q2_cv_real_labeled_5_f2 | v3_nosig | `{"real_train_per_N": 5, "real_fold": 2}` | 6.64 | 0.50 | 6.84 | 6.49 | 0.47 | 0.67 | 0.40 | 0.65 | -0.40 | 0.87 | 4 |
+| Q3_cv_dann_f1 | v3_nosig | `{"real_unlabeled_per_N": 5, "real_fold": 1}` | 7.61 | 0.41 | 8.47 | 12.49 | 0.20 | 0.53 | 0.23 | 0.39 | -0.43 | 0.92 | -1 |
+| Q4_cv_dann_f2 | v3_nosig | `{"real_unlabeled_per_N": 5, "real_fold": 2}` | 7.06 | 0.50 | 7.23 | 11.40 | 0.18 | 0.65 | 0.30 | 0.58 | -0.39 | 0.89 | -6 |
+| Q5_cv_dann_known_size_weight_f1 | v3_nosig | `{"real_unlabeled_per_N": 5, "material_input": ["diameter", "density", "mass"], "prop_weight": 0.0, "real_fold": 1}` | 5.97 | 0.57 | 7.04 | 11.13 | 0.25 | -0.03 | 0.00 | -0.56 | -0.07 | 0.88 | 2 |
+| Q6_cv_dann_known_size_weight_f2 | v3_nosig | `{"real_unlabeled_per_N": 5, "material_input": ["diameter", "density", "mass"], "prop_weight": 0.0, "real_fold": 2}` | 6.17 | 0.54 | 7.01 | 11.00 | 0.17 | -0.07 | -0.04 | -0.29 | -0.17 | 0.92 | -2 |
+
+## U. 단일 속도 + 다중 속도 데이터를 합쳐 학습한 단일 클립 모델 (세기 퍼짐 없음)
+
+| 실험 | 데이터 | 설정 | test MAE | test ±5 | OOD MAE | real MAE | real ±5 | R² 지름 | R² 밀도 | R² e_pw | corr(N,d) | 90% 구간 포함률 | real 속도 기울기 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| U1_merged_blind | merged_nosig | – | 7.52 | 0.48 | 8.59 | 16.82 | 0.19 | 0.71 | 0.41 | 0.52 | -0.45 | 0.91 | -1 |
+| U2_merged_dann | merged_nosig | `{"real_unlabeled_per_N": 5}` | 7.77 | 0.46 | 9.13 | 9.46 | 0.38 | 0.64 | 0.34 | 0.47 | -0.42 | 0.88 | -5 |
+| U3_merged_dann_known_size_weight | merged_nosig | `{"real_unlabeled_per_N": 5, "material_input": ["diameter", "density", "mass"], "prop_weight": 0.0}` | 6.54 | 0.53 | 7.67 | 8.52 | 0.40 | -7.01 | -1.43 | -1.28 | -0.09 | 0.90 | -3 |
+
 ## V. 충돌별 세기 퍼짐을 뺀 주 데이터 (W에서 찾은 원인 제거: v3 동역학·실제 충돌음 50 %·녹음 조건 그대로, 세기 퍼짐 0)
 
 | 실험 | 데이터 | 설정 | test MAE | test ±5 | OOD MAE | real MAE | real ±5 | R² 지름 | R² 밀도 | R² e_pw | corr(N,d) | 90% 구간 포함률 | real 속도 기울기 |
