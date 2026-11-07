@@ -209,8 +209,8 @@ def main(argv=None):
             common["threads"] = a.threads
         from rneml.suite import PARTS
         only = a.only
-        if a.part:
-            only = list(PARTS[a.part]) + list(a.only or [])
+        if a.part:   # --part with --only: just those experiments of the part (machines sharing a part)
+            only = [n for n in PARTS[a.part] if not a.only or n in a.only]
         run_suite({"v1": a.v1, "v1_old": a.v1_old, "v1_r2": a.v1_r2, "bb_fixed": a.bb_fixed,
                    "multi_rpm": a.multi_rpm, **dict(kv.split("=", 1) for kv in a.data)},
                   a.real_dir,

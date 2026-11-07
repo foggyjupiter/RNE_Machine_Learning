@@ -4,6 +4,7 @@
 # Env: DATA_DIR (default data), REAL_DIR (first-study recordings, default real/data-all),
 #      RESULTS_VIA=hf (machines that cannot push: results go to the HF dataset experiments/),
 #      REVERSE=1 (run the part's list last-first: a helper taking the tail of a slow part),
+#      ONLY="name1 name2" (run just these experiments of the part: several machines per part),
 #      COMPONENTS (M0 only: run the component analysis first; default 1).
 # Fetches only the data the part needs, runs it (resumable), and every 30 min and at the
 # end sends the results back (scripts/push_results.py). Writes "PART <P> DONE" to the log.
@@ -32,7 +33,8 @@ fi
 echo "SUITE PART $PART START $(date -u)" >> $LOG
 rneml suite --part "$PART" --v1 "$V1" --v1-old "$V1OLD" --v1-r2 "$V1R2" --bb-fixed "$BB" --multi-rpm "$MR" \
   --data "v1_sig=$V1SIG" --data "v1_clk=$V1CLK" \
-  --real-dir "$R" --size cpu --threads "$(nproc)" --max-priority 5 ${REVERSE:+--reverse} >> $LOG 2>&1 &
+  --real-dir "$R" --size cpu --threads "$(nproc)" --max-priority 5 ${REVERSE:+--reverse} \
+  ${ONLY:+--only $ONLY} >> $LOG 2>&1 &
 PID=$!
 while kill -0 $PID 2>/dev/null; do
   for i in $(seq 180); do kill -0 $PID 2>/dev/null || break; sleep 10; done
