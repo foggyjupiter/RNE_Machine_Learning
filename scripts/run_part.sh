@@ -15,6 +15,12 @@ R=${REAL_DIR:-real/data-all}
 export HF_TOKEN=${HF_TOKEN:-proxy-injected}
 mkdir -p logs
 LOG=logs/suite_$PART.log
+# 결과를 별도 위치(예: experiments_box7)로 올리는 재실험: 저장소에 커밋된 예전 outputs/가 있으면 suite가
+# 실험을 '이미 끝남'으로 건너뛰고 예전 결과를 올리므로, 처음 한 번 옆으로 옮긴다 (재시작 시에는 그대로 이어 감)
+if [ "${RNEML_RESULTS_PREFIX:-experiments}" != "experiments" ] && [ ! -f outputs/.fresh_run ]; then
+  [ -d outputs ] && mv outputs "outputs_committed_$(date +%s)"
+  mkdir -p outputs && touch outputs/.fresh_run
+fi
 # RESULTS_VIA=hf: no push access on this machine → results go to the HF dataset (experiments/)
 VIA=""; [ "${RESULTS_VIA:-git}" = "hf" ] && VIA="--via-hf"
 SETS=$(python3 -c "from rneml.suite import PART_DATA, SUITE_TO_HF; print(' '.join(SUITE_TO_HF[k] for k in PART_DATA['$PART']))")
