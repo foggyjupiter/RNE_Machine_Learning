@@ -247,7 +247,7 @@ PART_DATA = {"M0": ["v1", "v1_old", "v1_r2", "bb_fixed"], "M1a": ["v1"], "M1b": 
              "M6": ["v3_nosig"], "M7": ["v3_nosig"], "M8": ["multi_rpm_nosig"],
              "M9": ["v3_nosig"], "M10": ["v3_nosig", "multi_rpm_nosig"],
              "M11": ["v3_nosig", "lowe"],
-             "B7S": ["b7_v3_nosig"], "B7H": ["b7_multi_rpm_nosig"], "B7A": ["b7_bb_fixed"],
+             "B7S": ["b7_v3_nosig"], "B7H": ["b7_multi_rpm_nosig"], "B7A": ["b7_bb_fixed", "b7_v3_nosig"],
              "B7L": ["b7_v3_nosig", "b7_lowe"]}
 # data keys built on the machine from downloaded sets (scripts/merge_datasets.py, run_part.sh)
 DERIVED_DATA = {"merged_nosig": ["v3_nosig", "multi_rpm_nosig"], "v3_lowe": ["v3_nosig", "lowe"]}
