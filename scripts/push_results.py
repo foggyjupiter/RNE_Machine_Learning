@@ -25,6 +25,10 @@ SMALL = {"metrics.json", "predictions.jsonl", "config.yaml", "history.json", "sp
          "FAILED.txt", "provenance.json", "components.json"}
 
 
+# 결과를 올릴 HF 폴더 (상자 7×7×5 재실험은 experiments_box7 로 기존 결과와 분리)
+PREFIX = os.environ.get("RNEML_RESULTS_PREFIX", "experiments")
+
+
 def git(*args, check=True):
     return subprocess.run(["git", *args], check=check, capture_output=True, text=True)
 
@@ -50,13 +54,13 @@ def main():
         from huggingface_hub import CommitOperationAdd, HfApi
         up = files + ([] if a.no_models else [d / "model.pt" for d in dirs if (d / "model.pt").exists()])
         if up:
-            ops = [CommitOperationAdd(path_in_repo=f"experiments/{f.parent.name}/{f.name}", path_or_fileobj=str(f))
+            ops = [CommitOperationAdd(path_in_repo=f"{PREFIX}/{f.parent.name}/{f.name}", path_or_fileobj=str(f))
                    for f in up]
             for i in range(5):
                 try:
                     HfApi().create_commit(a.hf_repo, repo_type="dataset", operations=ops,
                                           commit_message=f"suite part {a.part}: {len(done)} finished")
-                    print(f"uploaded {len(ops)} files to {a.hf_repo}/experiments/")
+                    print(f"uploaded {len(ops)} files to {a.hf_repo}/{PREFIX}/")
                     break
                 except Exception as e:
                     print(f"upload failed (try {i + 1}): {e!r}"[:300])
@@ -80,12 +84,12 @@ def main():
             sys.exit("could not push the results")
     if not a.no_models:
         from huggingface_hub import CommitOperationAdd, HfApi
-        ops = [CommitOperationAdd(path_in_repo=f"experiments/{d.name}/model.pt", path_or_fileobj=str(d / "model.pt"))
+        ops = [CommitOperationAdd(path_in_repo=f"{PREFIX}/{d.name}/model.pt", path_or_fileobj=str(d / "model.pt"))
                for d in dirs if (d / "model.pt").exists()]
         if ops:
             HfApi().create_commit(a.hf_repo, repo_type="dataset", operations=ops,
                                   commit_message=f"models of suite part {a.part}")
-            print(f"uploaded {len(ops)} models to {a.hf_repo}/experiments/")
+            print(f"uploaded {len(ops)} models to {a.hf_repo}/{PREFIX}/")
 
 
 if __name__ == "__main__":

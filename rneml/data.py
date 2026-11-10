@@ -56,7 +56,9 @@ REAL_BB = {"diameter": 6e-3, "mass": 1.2e-4, "density": 1.2e-4 / (math.pi / 6 * 
 REAL_BB_ESTIMATED = {"e_pp": 0.95, "e_pw": 0.70}
 
 
-DATASETS = ("v1", "v3", "bb_fixed", "multi_rpm", "v1_r2", "v1_sig", "v1_clk", "v3_nosig", "multi_rpm_nosig", "lowe")    # v1 = repo root
+DATASETS = ("v1", "v3", "bb_fixed", "multi_rpm", "v1_r2", "v1_sig", "v1_clk", "v3_nosig", "multi_rpm_nosig", "lowe",
+            # 실제 상자(바닥 7×7 cm, 높이 5 cm)로 다시 만든 데이터 (2026-11-10 상자 치수 정정)
+            "box7/v3_nosig", "box7/multi_rpm_nosig", "box7/bb_fixed", "box7/lowe")    # v1 = repo root
 
 
 def fetch(local_dir: str | Path, repo_id: str = REPO_ID, audio: bool = True,

@@ -232,19 +232,32 @@ PARTS = {
            "Q5_cv_dann_known_size_weight_f1", "Q6_cv_dann_known_size_weight_f2"],
     "M10": ["U1_merged_blind", "U2_merged_dann", "U3_merged_dann_known_size_weight"],
     "M11": ["L1_lowe_blind", "L2_lowe_dann", "L3_lowe_dann_known_size_weight"],
+    # 실제 상자(바닥 7×7 cm, 높이 5 cm) 데이터로 실측 검증 핵심 실험을 다시 (같은 실험 정의, 데이터만 box7/).
+    # 세션 환경에서 V1_DIR·V3NOSIG_DIR·MRNOSIG_DIR·BB_DIR·V3LOWE_DIR·LOWE_DIR을 data/box7/... 로 주고,
+    # 결과는 RNEML_RESULTS_PREFIX=experiments_box7 로 기존 결과와 따로 올린다.
+    "B7S": ["F_rms", "F_gbm_physics", "V1_nosig_blind", "V4_nosig_dann", "V7_nosig_real_labeled_5",
+            "V8_nosig_dann_known_size_weight", "Q1_cv_real_labeled_5_f1", "Q2_cv_real_labeled_5_f2",
+            "Q3_cv_dann_f1", "Q4_cv_dann_f2", "Q5_cv_dann_known_size_weight_f1", "Q6_cv_dann_known_size_weight_f2"],
+    "B7H": ["H9_nosig_set_per_set", "H11_nosig_set_dann"],
+    "B7A": ["A4_first_study_repro", "A5_bb_trained"],
+    "B7L": ["L1_lowe_blind"],
 }
 PART_DATA = {"M0": ["v1", "v1_old", "v1_r2", "bb_fixed"], "M1a": ["v1"], "M1b": ["v1"], "M2": ["v1"],
              "M3": ["multi_rpm"], "M4": ["v1"], "M5": ["v1_sig", "v1_clk"],
              "M6": ["v3_nosig"], "M7": ["v3_nosig"], "M8": ["multi_rpm_nosig"],
              "M9": ["v3_nosig"], "M10": ["v3_nosig", "multi_rpm_nosig"],
-             "M11": ["v3_nosig", "lowe"]}
+             "M11": ["v3_nosig", "lowe"],
+             "B7S": ["b7_v3_nosig"], "B7H": ["b7_multi_rpm_nosig"], "B7A": ["b7_bb_fixed"],
+             "B7L": ["b7_v3_nosig", "b7_lowe"]}
 # data keys built on the machine from downloaded sets (scripts/merge_datasets.py, run_part.sh)
 DERIVED_DATA = {"merged_nosig": ["v3_nosig", "multi_rpm_nosig"], "v3_lowe": ["v3_nosig", "lowe"]}
 # suite data key → data set name on Hugging Face (rneml fetch --sets): the main data "v1" of
 # the suite is dataset v3 (calibrated); the old v1 is the repository root
 SUITE_TO_HF = {"v1": "v3", "v1_old": "v1", "v1_r2": "v1_r2", "bb_fixed": "bb_fixed", "multi_rpm": "multi_rpm",
                "v1_sig": "v1_sig", "v1_clk": "v1_clk", "v3_nosig": "v3_nosig",
-               "multi_rpm_nosig": "multi_rpm_nosig", "lowe": "lowe"}
+               "multi_rpm_nosig": "multi_rpm_nosig", "lowe": "lowe",
+               "b7_v3_nosig": "box7/v3_nosig", "b7_multi_rpm_nosig": "box7/multi_rpm_nosig",
+               "b7_bb_fixed": "box7/bb_fixed", "b7_lowe": "box7/lowe"}
 
 GROUP_TITLES = {
     "A": "A. 물질을 알려 주면 얼마나 좋아지나 (블라인드 vs 크기·무게 앎 vs 전부 앎 vs 물질 고정 학습)",

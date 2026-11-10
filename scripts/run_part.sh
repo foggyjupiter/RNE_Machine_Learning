@@ -33,8 +33,8 @@ fi
 if [ "$PART" = "M10" ] && [ ! -f "$MERGED/metadata.csv" ]; then
   python3 scripts/merge_datasets.py "$MERGED" "$D/v3_nosig" "$D/multi_rpm_nosig" >> $LOG 2>&1
 fi
-if [ "$PART" = "M11" ] && [ ! -f "$V3LOWE/metadata.csv" ]; then
-  python3 scripts/merge_datasets.py "$V3LOWE" "$D/v3_nosig" "$D/lowe" >> $LOG 2>&1
+if { [ "$PART" = "M11" ] || [ "$PART" = "B7L" ]; } && [ ! -f "$V3LOWE/metadata.csv" ]; then
+  python3 scripts/merge_datasets.py "$V3LOWE" "$V3NOSIG" "${LOWE_DIR:-$D/lowe}" >> $LOG 2>&1
 fi
 echo "SUITE PART $PART START $(date -u)" >> $LOG
 rneml suite --part "$PART" --v1 "$V1" --v1-old "$V1OLD" --v1-r2 "$V1R2" --bb-fixed "$BB" --multi-rpm "$MR" \
